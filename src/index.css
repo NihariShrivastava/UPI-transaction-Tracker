@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@theme {
+  --color-dark-bg: #000000;
+  --color-dark-card: #111111;
+  --color-dark-border: #222222;
+  --color-dark-hover: #333333;
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #a1a1aa;
+  --color-primary: #8b5cf6; /* Purple accent */
+  --color-danger: #ef4444;
+}
+
+body {
+  background-color: var(--color-dark-bg);
+  color: var(--color-text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  cursor: none;
+}
+
+/* Custom Scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-dark-bg); 
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-dark-border); 
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-dark-hover); 
+}
+
+input, textarea { cursor: text !important; }
+
+/* Hide default browser calendar icon in date inputs */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  display: none;
+  -webkit-appearance: none;
+}

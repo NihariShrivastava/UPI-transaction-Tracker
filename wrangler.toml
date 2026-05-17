@@ -1,0 +1,8 @@
+name = "upi-transaction-tracker"
+pages_build_output_dir = "dist"
+compatibility_date = "2024-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# DATABASE_URL = "postgresql://postgres:password@host:port/postgres"
+# JWT_SECRET = "your_super_secret_jwt_key_here"
