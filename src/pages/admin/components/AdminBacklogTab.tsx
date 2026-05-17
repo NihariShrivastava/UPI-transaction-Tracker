@@ -1,0 +1,360 @@
+import { useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Archive, Calendar, X, RefreshCw, Trash2, Users, Loader2 } from 'lucide-react';
+import { Button } from '../../../components/ui/Button';
+import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '../../../components/ui/Table';
+import { Card, CardHeader, CardTitle, CardContent } from '../../../components/ui/Card';
+
+interface AdminBacklogTabProps {
+  counterUploads: any[];
+  adminUploads: any[];
+  backlogFilterDate: string;
+  setBacklogFilterDate: (date: string) => void;
+  backlogLoading: boolean;
+  backlogSubTab: 'counter' | 'admin';
+  setBacklogSubTab: (tab: 'counter' | 'admin') => void;
+  onWipeBacklog: () => void;
+  onOpenBatchDetails: (batch: any) => void;
+  selectedBacklogCounter: any;
+  setSelectedBacklogCounter: (counter: any) => void;
+  onRefreshLogs: () => void;
+}
+
+export default function AdminBacklogTab({
+  counterUploads,
+  adminUploads,
+  backlogFilterDate,
+  setBacklogFilterDate,
+  backlogLoading,
+  backlogSubTab,
+  setBacklogSubTab,
+  onWipeBacklog,
+  onOpenBatchDetails,
+  selectedBacklogCounter,
+  setSelectedBacklogCounter,
+  onRefreshLogs
+}: AdminBacklogTabProps) {
+  const backlogDateInputRef = useRef<HTMLInputElement>(null);
+
+  // Filter helper applied inside the component to keep parent state simple
+  const filteredCounterUploads = counterUploads
+    .map(log => {
+      const matchedUploads = backlogFilterDate 
+        ? log.uploads.filter((u: any) => u.date === backlogFilterDate)
+        : log.uploads;
+      const totalCount = matchedUploads.reduce((acc: number, curr: any) => acc + curr.count, 0);
+      return {
+        ...log,
+        uploads: matchedUploads,
+        totalCount
+      };
+    })
+    .filter(log => log.uploads.length > 0);
+
+  const filteredAdminUploads = backlogFilterDate
+    ? adminUploads.filter(log => log.date === backlogFilterDate)
+    : adminUploads;
+
+  return (
+    <Card className="bg-[#111111] border-[#222222] animate-in fade-in slide-in-from-bottom-4 rounded-2xl shadow-xl overflow-hidden">
+      {/* Subtab selection headers */}
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[#222222] pb-6 gap-4">
+        <div className="flex items-center gap-2">
+          <Archive className="text-purple-400 w-6 h-6 animate-pulse" />
+          <div>
+            <CardTitle className="text-xl">Backlog History Reports</CardTitle>
+            <p className="text-xs text-text-secondary mt-1">Audit, inspect, and wipe historic excel transaction batches.</p>
+          </div>
+        </div>
+        
+        {/* Controls area */}
+        <div className="flex flex-wrap items-center gap-4">
+          
+          {/* Pill Subtabs */}
+          <div className="flex bg-[#000000] p-1 rounded-xl border border-[#222222]">
+            <button 
+              onClick={() => {
+                setBacklogSubTab('counter');
+                setSelectedBacklogCounter(null);
+              }}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                backlogSubTab === 'counter' ? 'bg-purple-600 text-white shadow-md' : 'text-text-secondary hover:text-white'
+              }`}
+            >
+              According to Counters
+            </button>
+            <button 
+              onClick={() => {
+                setBacklogSubTab('admin');
+                setSelectedBacklogCounter(null);
+              }}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                backlogSubTab === 'admin' ? 'bg-purple-600 text-white shadow-md' : 'text-text-secondary hover:text-white'
+              }`}
+            >
+              According to Admin
+            </button>
+          </div>
+
+          {/* Date Filter input */}
+          <div 
+            onClick={() => {
+              try {
+                backlogDateInputRef.current?.showPicker();
+              } catch (e) {
+                backlogDateInputRef.current?.focus();
+              }
+            }}
+            className="flex items-center gap-2 bg-[#000000] border border-[#222222] rounded-xl px-3 py-1.5 cursor-pointer hover:border-purple-500/50 transition-colors"
+          >
+            <Calendar className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+            <input 
+              type="date" 
+              ref={backlogDateInputRef}
+              value={backlogFilterDate}
+              onChange={e => setBacklogFilterDate(e.target.value)}
+              onClick={e => e.stopPropagation()}
+              className="bg-transparent text-xs text-white focus:outline-none cursor-pointer" 
+            />
+            {backlogFilterDate && (
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setBacklogFilterDate('');
+                }} 
+                className="text-text-secondary hover:text-white ml-1"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          {/* Refresh logs button */}
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={onRefreshLogs} 
+            className="w-9 h-9 p-0 rounded-xl bg-[#222222] border border-[#333333] hover:bg-[#333333]"
+            title="Refresh Backlog Logs"
+          >
+            <RefreshCw className="w-4 h-4 text-purple-400" />
+          </Button>
+
+          {/* Giant Database Backlog Wipe Button */}
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={onWipeBacklog} 
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600/10 border border-red-500/20 hover:bg-red-600 text-red-400 hover:text-white transition-all font-bold text-xs h-9 shadow-md"
+            title="Permanently wipe entire transaction database and discrepancy reports backlog"
+          >
+            <Trash2 className="w-4 h-4" />
+            Wipe Database Backlog
+          </Button>
+        </div>
+      </CardHeader>
+
+      <CardContent className="pt-6">
+        {backlogLoading ? (
+          <div className="flex flex-col items-center justify-center py-20 text-text-secondary gap-3">
+            <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
+            <span>Retrieving backlog upload entries...</span>
+          </div>
+        ) : backlogSubTab === 'counter' ? (
+          <div>
+            {filteredCounterUploads.length === 0 ? (
+              <div className="text-center py-16 text-text-secondary">
+                No counter transaction uploads found matching active filters.
+              </div>
+            ) : (
+              <div>
+                {/* Grid of Counter Boxes */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {filteredCounterUploads.map((log) => {
+                    const isSelected = selectedBacklogCounter?.counterId === log.counterId;
+                    return (
+                      <motion.div
+                        key={log.counterId}
+                        whileHover={{ y: -4, scale: 1.02 }}
+                        onClick={() => setSelectedBacklogCounter(log)}
+                        className={`group relative p-6 rounded-2xl border transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between ${
+                          isSelected 
+                            ? 'bg-gradient-to-br from-purple-900/30 to-[#111111] border-purple-500/60 shadow-[0_0_20px_rgba(139,92,246,0.15)]' 
+                            : 'bg-gradient-to-br from-[#161616] to-[#0d0d0d] border-[#222222] hover:border-purple-500/30'
+                        }`}
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+
+                        <div className="flex items-center gap-4">
+                          <div className={`p-3 rounded-xl transition-colors ${
+                            isSelected ? 'bg-purple-500 text-white' : 'bg-purple-500/10 text-purple-400'
+                          }`}>
+                            <Users className="w-5 h-5" />
+                          </div>
+                          <div className="flex-grow min-w-0">
+                            <h4 className="text-sm font-bold text-white tracking-wide group-hover:text-purple-300 transition-colors truncate" title={log.counterName}>
+                              {log.counterName}
+                            </h4>
+                            <p className="text-[11px] text-text-secondary mt-0.5 font-semibold">
+                              {log.uploads.length} distinct upload dates
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-6 pt-4 border-t border-[#222222]/80 flex justify-between items-center text-xs">
+                          <span className="text-text-secondary">Total Transactions:</span>
+                          <span className="font-mono text-purple-400 font-bold">{log.totalCount} rows</span>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+
+                {/* Detailed upload date history list for clicked counter */}
+                <AnimatePresence>
+                  {selectedBacklogCounter && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 20 }}
+                      className="mt-10 p-6 bg-[#161616] border border-purple-500/20 rounded-2xl shadow-2xl relative overflow-hidden animate-in fade-in duration-300"
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent pointer-events-none" />
+
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-[#222222] pb-5 mb-6 gap-4 relative z-10">
+                        <div>
+                          <span className="text-[9px] tracking-widest text-purple-400 font-extrabold uppercase bg-purple-500/10 px-2.5 py-1 rounded-md border border-purple-500/20">
+                            Detailed Upload History
+                          </span>
+                          <h4 className="text-xl font-extrabold text-white mt-2 flex items-center gap-2">
+                            <Users className="w-5 h-5 text-purple-400" />
+                            {selectedBacklogCounter.counterName}
+                          </h4>
+                        </div>
+                        <button 
+                          onClick={() => setSelectedBacklogCounter(null)}
+                          className="text-xs text-text-secondary hover:text-white px-3 py-1.5 rounded-xl bg-[#222222] hover:bg-[#333333] transition-colors border border-[#333333]"
+                        >
+                          Close Detailed View
+                        </button>
+                      </div>
+
+                      <div className="border border-[#222222] rounded-xl overflow-hidden bg-[#111111] relative z-10">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="hover:bg-transparent border-b border-[#222222] bg-[#1a1a1a]">
+                              <TableHead>Upload Date</TableHead>
+                              <TableHead className="text-center">Transaction Records Count</TableHead>
+                              <TableHead>Execution Status</TableHead>
+                              <TableHead className="text-right">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {selectedBacklogCounter.uploads.map((upload: any, idx: number) => (
+                              <TableRow key={`${upload.date}_${idx}`} className="hover:bg-[#222222]/20 border-b border-[#222222]/50 transition-colors">
+                                <TableCell className="font-mono text-white font-semibold">
+                                  {upload.date}
+                                </TableCell>
+                                <TableCell className="text-center font-mono text-purple-400 font-bold">
+                                  {upload.count} rows
+                                </TableCell>
+                                <TableCell>
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                    Completed
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => onOpenBatchDetails({
+                                      counter_id: selectedBacklogCounter.counterId,
+                                      counter_name: selectedBacklogCounter.counterName,
+                                      date: upload.date,
+                                      source: 'counter'
+                                    })}
+                                    className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-4 font-bold rounded-xl text-xs h-8 transition-all"
+                                  >
+                                    View Transactions
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Admin Upload Date logs without delete action */
+          <div className="border border-[#222222] rounded-2xl overflow-hidden bg-[#0d0d0d] shadow-xl">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent border-b border-[#222222] bg-[#161616]">
+                  <TableHead>Admin Upload Name</TableHead>
+                  <TableHead>Upload Date</TableHead>
+                  <TableHead className="text-center">Total Transaction Records</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredAdminUploads.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center py-12 text-text-secondary">
+                      No admin transaction uploads found matching active filters.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredAdminUploads.map((log, idx) => (
+                    <TableRow key={`${log.date}_${idx}`} className="hover:bg-[#222222]/10 border-b border-[#222222]/50 transition-colors">
+                      <TableCell className="font-semibold text-white">
+                        <span 
+                          onClick={() => onOpenBatchDetails({
+                            counter_id: null,
+                            counter_name: 'Main Admin Sheet',
+                            date: log.date,
+                            source: 'admin'
+                          })}
+                          className="cursor-pointer underline text-purple-400 hover:text-purple-300 font-bold transition-colors"
+                        >
+                          Main Admin Sheet
+                        </span>
+                      </TableCell>
+                      <TableCell className="font-mono text-text-secondary">{log.date}</TableCell>
+                      <TableCell className="text-center font-mono text-purple-400 font-bold">{log.count} rows</TableCell>
+                      <TableCell>
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          Completed
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onOpenBatchDetails({
+                            counter_id: null,
+                            counter_name: 'Main Admin Sheet',
+                            date: log.date,
+                            source: 'admin'
+                          })}
+                          className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-4 font-bold rounded-xl text-xs h-8 transition-all"
+                        >
+                          View Transactions
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

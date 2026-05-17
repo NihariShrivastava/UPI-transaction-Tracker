@@ -1,10 +1,12 @@
 import { useRef, useState, useEffect } from 'react';
-import { Upload, FileBarChart2, CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react';
+import { FileBarChart2, CheckCircle2, AlertCircle, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
-import { Button } from '../../components/ui/Button';
-import Logo from '../../components/ui/Logo';
+import { Card, CardContent } from '../../components/ui/Card';
 import { supabase } from '../../lib/supabase';
+
+import CounterHeader from './components/CounterHeader';
+import CounterUploadCard from './components/CounterUploadCard';
+import CounterDiscrepancyLog from './components/CounterDiscrepancyLog';
 
 // Fuzzy header synonym matching helper
 const findHeaderKey = (row: any, synonyms: string[]): string | null => {
@@ -263,19 +265,7 @@ export default function CounterDashboard({ username, onLogout }: { username: str
       <div className="max-w-7xl mx-auto space-y-8 relative z-10">
         
         {/* Top Navigation */}
-        <div className="flex justify-between items-center bg-[#111111]/80 backdrop-blur-xl p-4 rounded-2xl border border-[#222222] shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
-          <div className="flex items-center gap-4">
-            <Logo className="scale-75 origin-left" />
-            <div className="text-sm font-medium text-text-secondary border-l border-[#333333] pl-4 flex items-center gap-2">
-              <span>Counter:</span>
-              <span className="text-purple-400 font-bold text-lg">{username}</span>
-            </div>
-          </div>
-
-          <button onClick={onLogout} className="flex items-center text-text-secondary hover:text-danger hover:bg-danger/10 transition-all text-sm font-semibold bg-[#222222] px-4 py-2.5 rounded-xl border border-transparent hover:border-danger/20">
-            Logout
-          </button>
-        </div>
+        <CounterHeader username={username} onLogout={onLogout} />
 
         {/* Status Alerts */}
         {status && (
@@ -326,133 +316,19 @@ export default function CounterDashboard({ username, onLogout }: { username: str
         {/* Action Blocks Stacked Vertically */}
         <div className="flex flex-col gap-8">
           
-          {/* Upload Section - Full Width (Sleek Compact Height with Enhanced Readability) */}
-          <Card className="bg-[#111111] border-[#222222] rounded-2xl shadow-xl flex flex-col justify-between">
-            <CardHeader className="border-b border-[#222222] py-4 px-8 flex flex-row items-center justify-between bg-[#151515]">
-              <CardTitle className="text-base font-bold text-white">Upload New Sheets</CardTitle>
-              <span className="text-xs text-text-secondary hidden sm:inline">
-                Required columns: <span className="text-purple-400 font-semibold">Cheque Number</span>, <span className="text-purple-400 font-semibold">Cheque Date</span>, <span className="text-purple-400 font-semibold">Receipt</span>
-              </span>
-            </CardHeader>
-            <CardContent className="py-5 px-8 flex flex-col sm:flex-row items-center justify-between gap-6">
-              <div className="flex items-center gap-4">
-                <div 
-                  onClick={!uploading ? triggerFileSelect : undefined}
-                  className={`w-14 h-14 bg-[#222222] rounded-xl flex items-center justify-center border border-[#333333] shadow-inner group transition-all duration-300 ${
-                    !uploading ? 'cursor-pointer hover:border-purple-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.15)]' : 'opacity-50'
-                  }`}
-                >
-                  {uploading ? (
-                    <Loader2 className="w-7 h-7 text-purple-400 animate-spin" />
-                  ) : (
-                    <Upload className="w-7 h-7 text-purple-400 group-hover:scale-110 transition-transform" />
-                  )}
-                </div>
-                <div className="text-left">
-                  <h3 className="text-base font-bold text-white">
-                    {uploading ? 'Parsing Excel spreadsheet...' : 'Select Daily Excel File'}
-                  </h3>
-                  <p className="text-xs text-text-secondary mt-0.5">
-                    Click the upload icon or button on the right to import your daily counter spreadsheet.
-                  </p>
-                </div>
-              </div>
-              <div className="shrink-0">
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  onChange={handleFileChange}
-                  accept=".xlsx, .xls"
-                  className="hidden" 
-                />
-                <Button 
-                  onClick={triggerFileSelect} 
-                  disabled={uploading}
-                  className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl h-10 px-8 text-sm font-semibold shadow-[0_0_15px_rgba(139,92,246,0.2)] disabled:opacity-50"
-                >
-                  {uploading ? 'Uploading...' : 'Choose Excel File'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          {/* Upload Section - Full Width */}
+          <CounterUploadCard
+            uploading={uploading}
+            fileInputRef={fileInputRef}
+            onFileChange={handleFileChange}
+            triggerFileSelect={triggerFileSelect}
+          />
 
           {/* Discrepancies Section - Full Width Below */}
-          <Card className="bg-[#111111] border-[#222222] rounded-2xl shadow-xl flex flex-col justify-between overflow-hidden">
-            <CardHeader className="border-b border-[#222222] pb-4 flex flex-row justify-between items-center bg-[#151515]">
-              <CardTitle className="text-lg font-bold text-white flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 text-purple-400" />
-                Discrepancy Log
-              </CardTitle>
-              {reports.length > 0 && (
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-red-500/10 text-red-400 border border-red-500/20">
-                  {reports.length} Alerts
-                </span>
-              )}
-            </CardHeader>
-            <CardContent className="p-6 flex flex-col justify-start overflow-hidden">
-              {reportsLoading ? (
-                <div className="flex flex-col items-center justify-center py-20 text-text-secondary gap-3">
-                  <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
-                  <span className="text-xs">Reconciling records...</span>
-                </div>
-              ) : reports.length === 0 ? (
-                <div className="flex flex-col items-center justify-center text-center space-y-4 py-8">
-                  <div className="p-4 bg-emerald-500/10 rounded-2xl text-emerald-400 animate-pulse">
-                    <CheckCircle2 className="w-10 h-10" />
-                  </div>
-                  <h4 className="font-bold text-white text-base">Perfect Reconciliation</h4>
-                  <p className="text-xs text-text-secondary leading-relaxed max-w-[320px]">
-                    All transactions uploaded by your counter are fully balanced against server records. No discrepancies detected.
-                  </p>
-                  <div className="w-full max-w-xs border-t border-[#222222]/50 pt-4 mt-2 text-left mx-auto">
-                    <span className="text-[10px] text-text-secondary uppercase tracking-widest block mb-2 text-center">Reconciliation Status</span>
-                    <div className="flex items-center justify-between text-xs font-semibold text-white">
-                      <span>Admin Excel Checked</span>
-                      <span className="text-emerald-400 text-right">Verified</span>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <p className="text-[11px] text-text-secondary leading-relaxed mb-2">
-                    The following discrepancies have been generated by the administrator. Please audit your entries:
-                  </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[500px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-purple-900/30 scrollbar-track-transparent">
-                    {reports.map((report) => (
-                      <div 
-                        key={report.id}
-                        className="p-4 bg-[#0d0d0d] border border-[#222222] rounded-xl space-y-2.5 transition-all hover:border-purple-500/20"
-                      >
-                        <div className="flex justify-between items-center">
-                          <span className="text-[10px] font-mono text-purple-400 font-bold bg-purple-500/10 px-2 py-0.5 rounded">
-                            {report.date}
-                          </span>
-                          <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
-                            report.type === 'missing_in_admin'
-                              ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                              : 'bg-orange-500/10 text-orange-400 border border-orange-500/20'
-                          }`}>
-                            {report.type === 'missing_in_admin' ? 'Missing UTR' : 'Duplicate'}
-                          </span>
-                        </div>
-                        <div className="space-y-1">
-                          <span className="block text-[11px] font-semibold text-text-secondary">
-                            Ref / Cheque: <span className="text-white font-mono">{report.upi_id}</span>
-                          </span>
-                          <span className="block text-[11px] font-semibold text-text-secondary">
-                            Amount: <span className="text-purple-400 font-bold">₹{Number(report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-text-secondary leading-relaxed pt-1.5 border-t border-[#222222]/50 italic">
-                          {report.details?.message || 'Check amount and transaction reference matches.'}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <CounterDiscrepancyLog
+            reports={reports}
+            reportsLoading={reportsLoading}
+          />
 
         </div>
 
