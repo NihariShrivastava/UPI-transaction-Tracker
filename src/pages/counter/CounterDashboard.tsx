@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase';
 import CounterHeader from './components/CounterHeader';
 import CounterUploadCard from './components/CounterUploadCard';
 import CounterDiscrepancyLog from './components/CounterDiscrepancyLog';
+import CounterUploadHistory from './components/CounterUploadHistory';
 
 // Fuzzy header synonym matching helper
 const findHeaderKey = (row: any, synonyms: string[]): string | null => {
@@ -80,6 +81,38 @@ export default function CounterDashboard({ username, onLogout }: { username: str
   const [reports, setReports] = useState<any[]>([]);
   const [reportsLoading, setReportsLoading] = useState(true);
 
+  const [uploads, setUploads] = useState<any[]>([]);
+  const [uploadsLoading, setUploadsLoading] = useState(true);
+
+  const fetchUploadHistory = async (userId: number) => {
+    try {
+      setUploadsLoading(true);
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('date, amount')
+        .eq('source', 'counter')
+        .eq('counter_id', userId);
+
+      if (!error && data) {
+        const grouped: { [key: string]: { date: string; count: number; totalAmount: number } } = {};
+        data.forEach(item => {
+          const d = item.date;
+          if (!grouped[d]) {
+            grouped[d] = { date: d, count: 0, totalAmount: 0 };
+          }
+          grouped[d].count += 1;
+          grouped[d].totalAmount += Number(item.amount);
+        });
+        const arr = Object.values(grouped).sort((a, b) => b.date.localeCompare(a.date));
+        setUploads(arr);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setUploadsLoading(false);
+    }
+  };
+
   const fetchCounterProfileAndReports = async () => {
     try {
       setReportsLoading(true);
@@ -103,6 +136,8 @@ export default function CounterDashboard({ username, onLogout }: { username: str
       if (!reportsError && reportsData) {
         setReports(reportsData);
       }
+
+      await fetchUploadHistory(user.id);
     } catch (e) {
       console.error(e);
     } finally {
@@ -161,6 +196,19 @@ export default function CounterDashboard({ username, onLogout }: { username: str
         const transactionsToInsert: any[] = [];
         const uniqueDates = new Set<string>();
 
+        // Extract PhonePe ID from column values (e.g. SKC SALES PHONE PE ID (83010307590))
+        let phonepeId = '';
+        for (const row of rows) {
+          for (const key of Object.keys(row)) {
+            const val = String(row[key]).trim();
+            if (val.toUpperCase().includes('PHONE PE ID') || val.toUpperCase().includes('PHONEPE ID') || val.toUpperCase().includes('SKC SALES')) {
+              phonepeId = val;
+              break;
+            }
+          }
+          if (phonepeId) break;
+        }
+
         // Query the database user first to get the correct counter ID
         const { data: user, error: userError } = await supabase
           .from('users')
@@ -170,6 +218,16 @@ export default function CounterDashboard({ username, onLogout }: { username: str
 
         if (userError || !user) {
           throw new Error(`Profile query failed for user '${username}': ${userError?.message || 'User not found.'}`);
+        }
+
+        if (phonepeId) {
+          const { error: updateError } = await supabase
+            .from('users')
+            .update({ counter_name: phonepeId })
+            .eq('id', user.id);
+          if (updateError) {
+            console.error('Failed to update counter_name with phonepeId:', updateError.message);
+          }
         }
 
         rows.forEach((row, index) => {
@@ -328,6 +386,12 @@ export default function CounterDashboard({ username, onLogout }: { username: str
           <CounterDiscrepancyLog
             reports={reports}
             reportsLoading={reportsLoading}
+          />
+
+          {/* Upload History Section - Full Width Below */}
+          <CounterUploadHistory
+            uploads={uploads}
+            uploadsLoading={uploadsLoading}
           />
 
         </div>

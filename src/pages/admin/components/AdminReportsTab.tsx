@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight, AlertTriangle, Calendar, X, Users } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
@@ -31,6 +31,20 @@ export default function AdminReportsTab({
   groupedReportsByCounter
 }: AdminReportsTabProps) {
   const reportsDateInputRef = useRef<HTMLInputElement>(null);
+  const [tempFilterDate, setTempFilterDate] = useState(reportsFilterDate);
+
+  useEffect(() => {
+    setTempFilterDate(reportsFilterDate);
+  }, [reportsFilterDate]);
+
+  const handleApplyDate = () => {
+    setReportsFilterDate(tempFilterDate);
+  };
+
+  const handleClearDate = () => {
+    setTempFilterDate('');
+    setReportsFilterDate('');
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
@@ -79,35 +93,56 @@ export default function AdminReportsTab({
             }`} />
             Viewing verified live discrepancy reports.
           </div>
-          <div 
-            onClick={() => {
-              try {
-                reportsDateInputRef.current?.showPicker();
-              } catch (e) {
-                reportsDateInputRef.current?.focus();
-              }
-            }}
-            className="flex items-center gap-2 bg-[#000000] border border-[#222222] rounded-xl px-3 py-1.5 cursor-pointer hover:border-purple-500/50 transition-colors"
-          >
-            <Calendar className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-            <input 
-              type="date" 
-              ref={reportsDateInputRef}
-              value={reportsFilterDate}
-              onChange={e => setReportsFilterDate(e.target.value)}
-              onClick={e => e.stopPropagation()}
-              className="bg-transparent text-xs text-white focus:outline-none cursor-pointer" 
-            />
+          
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+            <div 
+              onClick={() => {
+                try {
+                  reportsDateInputRef.current?.showPicker();
+                } catch (e) {
+                  reportsDateInputRef.current?.focus();
+                }
+              }}
+              className="flex items-center gap-2 bg-[#000000] border border-[#222222] rounded-xl px-3 py-1.5 cursor-pointer hover:border-purple-500/50 transition-colors w-full sm:w-auto"
+            >
+              <Calendar className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+              <input 
+                type="date" 
+                ref={reportsDateInputRef}
+                value={tempFilterDate}
+                onChange={e => setTempFilterDate(e.target.value)}
+                onClick={e => e.stopPropagation()}
+                className="bg-transparent text-xs text-white focus:outline-none cursor-pointer w-full" 
+              />
+              {tempFilterDate && (
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleClearDate();
+                  }} 
+                  className="text-text-secondary hover:text-white ml-1 font-bold"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+
+            <Button
+              onClick={handleApplyDate}
+              disabled={!tempFilterDate}
+              className="bg-purple-600 hover:bg-purple-700 disabled:bg-[#222222] disabled:text-text-secondary text-white font-bold text-xs px-4 h-[34px] rounded-xl transition-all"
+            >
+              Apply
+            </Button>
+
             {reportsFilterDate && (
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setReportsFilterDate('');
-                }} 
-                className="text-text-secondary hover:text-white ml-1 font-bold"
+              <Button
+                onClick={handleClearDate}
+                variant="ghost"
+                className="text-text-secondary hover:text-white font-bold text-xs px-3 h-[34px] rounded-xl"
               >
-                <X className="w-3 h-3" />
-              </button>
+                Clear
+              </Button>
             )}
           </div>
         </div>
@@ -125,6 +160,16 @@ export default function AdminReportsTab({
           </div>
         ) : (
           <div>
+            {currentSlide === 1 && (
+              <div className="mb-6 p-4 bg-[#151515] border border-[#222222] rounded-2xl flex items-center justify-between shadow-md animate-in fade-in duration-300">
+                <span className="text-xs text-text-secondary font-medium">
+                  Total Discrepancies Count:
+                </span>
+                <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+                  {reportsData.length} Cards Mismatched
+                </span>
+              </div>
+            )}
             {currentSlide === 0 ? (
               /* Slide 0: Missing in Admin (Grouped by Counter Cards) */
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">

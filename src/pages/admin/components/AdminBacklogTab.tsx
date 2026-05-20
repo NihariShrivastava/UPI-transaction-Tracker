@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Archive, Calendar, X, RefreshCw, Trash2, Users, Loader2 } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
@@ -35,6 +35,20 @@ export default function AdminBacklogTab({
   onRefreshLogs
 }: AdminBacklogTabProps) {
   const backlogDateInputRef = useRef<HTMLInputElement>(null);
+  const [tempFilterDate, setTempFilterDate] = useState(backlogFilterDate);
+
+  useEffect(() => {
+    setTempFilterDate(backlogFilterDate);
+  }, [backlogFilterDate]);
+
+  const handleApplyDate = () => {
+    setBacklogFilterDate(tempFilterDate);
+  };
+
+  const handleClearDate = () => {
+    setTempFilterDate('');
+    setBacklogFilterDate('');
+  };
 
   // Filter helper applied inside the component to keep parent state simple
   const filteredCounterUploads = counterUploads
@@ -97,35 +111,55 @@ export default function AdminBacklogTab({
           </div>
 
           {/* Date Filter input */}
-          <div 
-            onClick={() => {
-              try {
-                backlogDateInputRef.current?.showPicker();
-              } catch (e) {
-                backlogDateInputRef.current?.focus();
-              }
-            }}
-            className="flex items-center gap-2 bg-[#000000] border border-[#222222] rounded-xl px-3 py-1.5 cursor-pointer hover:border-purple-500/50 transition-colors"
-          >
-            <Calendar className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-            <input 
-              type="date" 
-              ref={backlogDateInputRef}
-              value={backlogFilterDate}
-              onChange={e => setBacklogFilterDate(e.target.value)}
-              onClick={e => e.stopPropagation()}
-              className="bg-transparent text-xs text-white focus:outline-none cursor-pointer" 
-            />
+          <div className="flex flex-wrap items-center gap-2">
+            <div 
+              onClick={() => {
+                try {
+                  backlogDateInputRef.current?.showPicker();
+                } catch (e) {
+                  backlogDateInputRef.current?.focus();
+                }
+              }}
+              className="flex items-center gap-2 bg-[#000000] border border-[#222222] rounded-xl px-3 py-1.5 cursor-pointer hover:border-purple-500/50 transition-colors"
+            >
+              <Calendar className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+              <input 
+                type="date" 
+                ref={backlogDateInputRef}
+                value={tempFilterDate}
+                onChange={e => setTempFilterDate(e.target.value)}
+                onClick={e => e.stopPropagation()}
+                className="bg-transparent text-xs text-white focus:outline-none cursor-pointer" 
+              />
+              {tempFilterDate && (
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleClearDate();
+                  }} 
+                  className="text-text-secondary hover:text-white ml-1 font-bold"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+
+            <Button
+              onClick={handleApplyDate}
+              disabled={!tempFilterDate}
+              className="bg-purple-600 hover:bg-purple-700 disabled:bg-[#222222] disabled:text-text-secondary text-white font-bold text-xs px-4 h-[34px] rounded-xl transition-all"
+            >
+              Apply
+            </Button>
+
             {backlogFilterDate && (
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setBacklogFilterDate('');
-                }} 
-                className="text-text-secondary hover:text-white ml-1"
+              <Button
+                onClick={handleClearDate}
+                variant="ghost"
+                className="text-text-secondary hover:text-white font-bold text-xs px-3 h-[34px] rounded-xl"
               >
-                <X className="w-3 h-3" />
-              </button>
+                Clear
+              </Button>
             )}
           </div>
 

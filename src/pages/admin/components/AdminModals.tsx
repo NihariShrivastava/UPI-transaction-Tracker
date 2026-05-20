@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Sparkles, Loader2, Search } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../../components/ui/Card';
@@ -106,6 +107,18 @@ export function ReportGroupDetailsModal({
   reportsFilterDate,
   onResolveReport
 }: ReportGroupDetailsModalProps) {
+  const [selectedUpiId, setSelectedUpiId] = useState('');
+
+  const uniqueUpiIds = group && group.counterName
+    ? [group.counterName]
+    : [];
+
+  const filteredReports = group && selectedUpiId && selectedUpiId !== group.counterName
+    ? group.reports.filter((r: any) => r.upi_id === selectedUpiId)
+    : group ? group.reports : [];
+
+  const totalAmount = filteredReports.reduce((acc: number, r: any) => acc + Number(r.amount), 0);
+
   return (
     <AnimatePresence>
       {group && (
@@ -135,13 +148,39 @@ export function ReportGroupDetailsModal({
               </button>
             </div>
 
-            {/* Info Bar */}
-            <div className="px-6 py-4 bg-[#111111] border-b border-[#222222]/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-              <div className="text-xs text-text-secondary">
-                Total Discrepancies: <span className="text-white font-bold">{group.reports.length} items</span>
+            {/* Info Bar & Filter */}
+            <div className="px-6 py-4 bg-[#111111] border-b border-[#222222]/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div className="flex flex-wrap gap-6 text-xs text-text-secondary">
+                <div>
+                  Total Discrepancies: <span className="text-white font-bold">{filteredReports.length} of {group.reports.length} items</span>
+                </div>
+                <div>
+                  Mismatched Value Sum: <span className="text-purple-400 font-bold">₹{totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                </div>
               </div>
-              <div className="text-xs text-text-secondary">
-                Mismatched Value Sum: <span className="text-purple-400 font-bold">₹{group.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+
+              {/* ID selector dropdown */}
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <span className="text-xs text-text-secondary whitespace-nowrap font-medium">Filter by PhonePe / UPI ID:</span>
+                <select
+                  value={selectedUpiId}
+                  onChange={e => setSelectedUpiId(e.target.value)}
+                  className="w-full md:w-[220px] bg-[#000000] border border-[#222222] hover:border-purple-500/50 focus:border-purple-500 rounded-xl h-9 px-3 text-xs text-white focus:outline-none transition-all cursor-pointer"
+                >
+                  <option value="">All UPI IDs / PhonePe IDs</option>
+                  {uniqueUpiIds.map((id: any) => (
+                    <option key={id} value={id}>{id}</option>
+                  ))}
+                </select>
+                {selectedUpiId && (
+                  <button
+                    onClick={() => setSelectedUpiId('')}
+                    className="text-text-secondary hover:text-white p-1"
+                    title="Clear ID filter"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -159,7 +198,7 @@ export function ReportGroupDetailsModal({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {group.reports.map((report: any, idx: number) => (
+                    {filteredReports.map((report: any, idx: number) => (
                       <TableRow key={report.id} className="hover:bg-[#222222]/20 border-b border-[#222222]/50 transition-colors animate-in slide-in-from-left duration-200">
                         <TableCell className="font-mono text-text-secondary text-xs">{idx + 1}</TableCell>
                         <TableCell className="font-mono text-white font-semibold">{report.upi_id}</TableCell>

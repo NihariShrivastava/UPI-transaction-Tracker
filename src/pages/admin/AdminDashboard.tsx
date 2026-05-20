@@ -194,8 +194,9 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         .limit(1);
 
       if (!error && data && data.length > 0) {
-        setReportsFilterDate(data[0].date);
-        setBacklogFilterDate(data[0].date);
+        // Keep initial filters empty so all entries are visible on first load
+        // setReportsFilterDate(data[0].date);
+        // setBacklogFilterDate(data[0].date);
       }
     } catch (e) {
       console.error('Failed to fetch latest data date:', e);

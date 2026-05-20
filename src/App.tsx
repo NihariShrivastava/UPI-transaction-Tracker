@@ -11,18 +11,32 @@ type AuthState = {
 };
 
 function App() {
-  const [auth, setAuth] = useState<AuthState>({
-    isAuthenticated: false,
-    role: null,
-    username: null,
+  const [auth, setAuth] = useState<AuthState>(() => {
+    const saved = localStorage.getItem('upi_auth_state');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error('Failed to parse saved auth state', e);
+      }
+    }
+    return {
+      isAuthenticated: false,
+      role: null,
+      username: null,
+    };
   });
 
   const handleLogin = (role: 'admin' | 'counter', username: string) => {
-    setAuth({ isAuthenticated: true, role, username });
+    const newState: AuthState = { isAuthenticated: true, role, username };
+    setAuth(newState);
+    localStorage.setItem('upi_auth_state', JSON.stringify(newState));
   };
 
   const handleLogout = () => {
-    setAuth({ isAuthenticated: false, role: null, username: null });
+    const newState: AuthState = { isAuthenticated: false, role: null, username: null };
+    setAuth(newState);
+    localStorage.removeItem('upi_auth_state');
   };
 
   return (
