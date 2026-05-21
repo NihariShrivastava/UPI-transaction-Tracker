@@ -22,6 +22,7 @@ interface ReportGroupDetailsModalProps {
   onClose: () => void;
   reportsFilterDate: string;
   onResolveReport: (id: number) => void;
+  onEditReport: (id: number, newUpiId: string, newAmount: number) => Promise<void>;
 }
 
 interface BatchDetailsModalProps {
@@ -105,9 +106,14 @@ export function ReportGroupDetailsModal({
   group,
   onClose,
   reportsFilterDate,
-  onResolveReport
+  onResolveReport,
+  onEditReport
 }: ReportGroupDetailsModalProps) {
   const [selectedUpiId, setSelectedUpiId] = useState('');
+  const [editingReportId, setEditingReportId] = useState<number | null>(null);
+  const [editUpiId, setEditUpiId] = useState('');
+  const [editAmount, setEditAmount] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   const uniqueUpiIds = group && group.counterName
     ? [group.counterName]
@@ -198,28 +204,106 @@ export function ReportGroupDetailsModal({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredReports.map((report: any, idx: number) => (
-                      <TableRow key={report.id} className="hover:bg-[#222222]/20 border-b border-[#222222]/50 transition-colors animate-in slide-in-from-left duration-200">
-                        <TableCell className="font-mono text-text-secondary text-xs">{idx + 1}</TableCell>
-                        <TableCell className="font-mono text-white font-semibold">{report.upi_id}</TableCell>
-                        <TableCell className="font-mono text-purple-400 font-bold">
-                          ₹{Number(report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </TableCell>
-                        <TableCell className="text-xs text-text-secondary leading-relaxed max-w-[280px] truncate" title={report.details?.message}>
-                          {report.details?.message || `Missing in Admin sheet.`}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            onClick={() => onResolveReport(report.id)}
-                            className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 px-3 font-semibold rounded-lg text-xs h-8"
-                          >
-                            Resolve
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {filteredReports.map((report: any, idx: number) => {
+                      const isEditing = editingReportId === report.id;
+                      return (
+                        <TableRow key={report.id} className="hover:bg-[#222222]/20 border-b border-[#222222]/50 transition-colors animate-in slide-in-from-left duration-200">
+                          <TableCell className="font-mono text-text-secondary text-xs">{idx + 1}</TableCell>
+                          <TableCell className="font-mono text-white font-semibold">
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                value={editUpiId}
+                                onChange={e => setEditUpiId(e.target.value)}
+                                className="w-full bg-[#000000] border border-purple-500/50 rounded-xl h-9 px-3 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
+                              />
+                            ) : (
+                              report.upi_id
+                            )}
+                          </TableCell>
+                          <TableCell className="font-mono text-purple-400 font-bold">
+                            {isEditing ? (
+                              <div className="relative">
+                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-purple-400 text-xs">₹</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={editAmount}
+                                  onChange={e => setEditAmount(e.target.value)}
+                                  className="w-[120px] bg-[#000000] border border-purple-500/50 rounded-xl h-9 pl-6 pr-3 text-xs text-purple-400 font-bold focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
+                                />
+                              </div>
+                            ) : (
+                              `₹${Number(report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs text-text-secondary leading-relaxed max-w-[280px] truncate" title={report.details?.message}>
+                            {report.details?.message || `Missing in Admin sheet.`}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {isEditing ? (
+                              <div className="flex justify-end gap-2">
+                                <Button 
+                                  variant="primary" 
+                                  size="sm" 
+                                  disabled={isSaving}
+                                  onClick={async () => {
+                                    if (!editUpiId.trim() || !editAmount.trim()) {
+                                      alert("Cheque/UTR and Amount cannot be empty.");
+                                      return;
+                                    }
+                                    setIsSaving(true);
+                                    try {
+                                      await onEditReport(report.id, editUpiId, Number(editAmount));
+                                      setEditingReportId(null);
+                                    } catch (e) {
+                                      console.error(e);
+                                    } finally {
+                                      setIsSaving(false);
+                                    }
+                                  }}
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs h-8 px-4"
+                                >
+                                  {isSaving ? "Saving..." : "Save"}
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  disabled={isSaving}
+                                  onClick={() => setEditingReportId(null)}
+                                  className="text-red-400 hover:text-red-300 hover:bg-red-500/10 font-semibold rounded-lg text-xs h-8 px-3"
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex justify-end gap-2">
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  onClick={() => {
+                                    setEditingReportId(report.id);
+                                    setEditUpiId(report.upi_id);
+                                    setEditAmount(String(report.amount));
+                                  }}
+                                  className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-3 font-semibold rounded-lg text-xs h-8"
+                                >
+                                  Edit
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  onClick={() => onResolveReport(report.id)}
+                                  className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 px-3 font-semibold rounded-lg text-xs h-8"
+                                >
+                                  Resolve
+                                </Button>
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>

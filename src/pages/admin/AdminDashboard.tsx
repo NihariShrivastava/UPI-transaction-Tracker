@@ -824,6 +824,120 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     }
   };
 
+  // Edit matching transaction details and update the discrepancy report (leaving resolution manual)
+  const handleEditReport = async (reportId: number, newUpiId: string, newAmount: number) => {
+    try {
+      // 1. Get the original report to find the matching transaction details
+      const { data: originalReport, error: getReportError } = await supabase
+        .from('reports')
+        .select('*')
+        .eq('id', reportId)
+        .single();
+
+      if (getReportError || !originalReport) {
+        alert('Error retrieving report details: ' + (getReportError?.message || 'Report not found'));
+        return;
+      }
+
+      // 2. Identify the transaction source
+      let source = 'counter';
+      if (originalReport.type === 'missing_in_counter') {
+        source = 'admin';
+      } else if (originalReport.type === 'duplicate_upi') {
+        source = originalReport.details?.source || 'counter';
+      }
+
+      // 3. Find the transaction in the transactions table
+      let findTxQuery = supabase
+        .from('transactions')
+        .select('id')
+        .eq('upi_id', originalReport.upi_id)
+        .eq('date', originalReport.date)
+        .eq('source', source);
+
+      if (source === 'counter' && originalReport.counter_id) {
+        findTxQuery = findTxQuery.eq('counter_id', originalReport.counter_id);
+      }
+
+      const { data: txs, error: txError } = await findTxQuery;
+
+      if (txError) {
+        console.error('Error finding matching transaction:', txError.message);
+      }
+
+      // 4. Update the transaction in the transactions table if found
+      if (txs && txs.length > 0) {
+        const txIds = txs.map(t => t.id);
+        const { error: updateTxError } = await supabase
+          .from('transactions')
+          .update({
+            upi_id: newUpiId,
+            amount: newAmount
+          })
+          .in('id', txIds);
+
+        if (updateTxError) {
+          alert('Error updating transaction details: ' + updateTxError.message);
+          return;
+        }
+      } else {
+        console.warn('Matching transaction not found in database to edit.');
+      }
+
+      // 5. Update report values inside the reports table so it correctly shows updated details
+      const updatedDetails = {
+        ...originalReport.details,
+        message: originalReport.type === 'missing_in_admin'
+          ? `Cheque Number '${newUpiId}' is available in Counter but missing in Admin sheet.`
+          : originalReport.type === 'missing_in_counter'
+          ? `Transaction UTR '${newUpiId}' is available in Admin but missing from all Counter sheets.`
+          : originalReport.details?.message
+      };
+
+      const { error: updateReportError } = await supabase
+        .from('reports')
+        .update({
+          upi_id: newUpiId,
+          amount: newAmount,
+          details: updatedDetails
+        })
+        .eq('id', reportId);
+
+      if (updateReportError) {
+        alert('Error updating report details: ' + updateReportError.message);
+      } else {
+        // Update local modal state dynamically
+        setSelectedReportCounterGroup((prev) => {
+          if (!prev) return null;
+          const updatedReports = prev.reports.map(r => {
+            if (r.id === reportId) {
+              return {
+                ...r,
+                upi_id: newUpiId,
+                amount: newAmount,
+                details: updatedDetails
+              };
+            }
+            return r;
+          });
+          const updatedTotal = updatedReports.reduce((sum, r) => sum + Number(r.amount), 0);
+          return {
+            ...prev,
+            reports: updatedReports,
+            totalAmount: updatedTotal
+          };
+        });
+        
+        // Refresh all reports and dashboard stats
+        fetchReports();
+        fetchSystemMetrics();
+      }
+    } catch (err: any) {
+      console.error('Error in edit:', err);
+      alert('An unexpected error occurred: ' + err.message);
+    }
+  };
+
   const nextSlide = () => {
     setCurrentSlide((prev) => (prev + 1) % slides.length);
     setReportsData([]);
@@ -999,6 +1113,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         onClose={() => setSelectedReportCounterGroup(null)}
         reportsFilterDate={reportsFilterDate}
         onResolveReport={handleResolveReport}
+        onEditReport={handleEditReport}
       />
 
       <BatchDetailsModal
