@@ -153,164 +153,357 @@ export default function CounterDashboard({ username, onLogout }: { username: str
     fileInputRef.current?.click();
   };
 
+  // STRICT THREE-WAY RECONCILIATION ENGINE FOR IMMEDIATE BALANCING ON UPLOAD
+  const compareTransactionsForDates = async (dates: string[]) => {
+    for (const date of dates) {
+      try {
+        const { data: txs, error: txError } = await supabase
+          .from('transactions')
+          .select('*, users(counter_name)')
+          .eq('date', date);
+
+        if (txError || !txs) {
+          console.error(`Error fetching transactions for comparison on ${date}:`, txError?.message);
+          continue;
+        }
+
+        const counterTxs = txs.filter(t => t.source === 'counter');
+        const adminTxs = txs.filter(t => t.source === 'admin');
+
+        // Clear pre-existing reports to prevent drift/overlap
+        await supabase
+          .from('reports')
+          .delete()
+          .eq('date', date);
+
+        // STRICT REQUIREMENT: If admin has not uploaded transactions for this date yet,
+        // do not run reconciliation or generate any discrepancy reports.
+        if (adminTxs.length === 0) {
+          continue;
+        }
+
+        const reportsToInsert: any[] = [];
+
+        // Group counter transactions by trimmed lower UTR / Cheque No (last 10 characters for matching)
+        const counterMap = new Map<string, any[]>();
+        counterTxs.forEach(t => {
+          let key = String(t.upi_id).trim().toLowerCase();
+          if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
+          const matchKey = key.slice(-10);
+          if (!counterMap.has(matchKey)) counterMap.set(matchKey, []);
+          counterMap.get(matchKey)!.push(t);
+        });
+
+        // Group admin transactions by trimmed lower UTR (last 10 characters for matching)
+        const adminMap = new Map<string, any[]>();
+        adminTxs.forEach(t => {
+          let key = String(t.upi_id).trim().toLowerCase();
+          if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
+          const matchKey = key.slice(-10);
+          if (!adminMap.has(matchKey)) adminMap.set(matchKey, []);
+          adminMap.get(matchKey)!.push(t);
+        });
+
+        // Check duplicate Cheque Numbers in Counter sheets
+        for (const [, list] of counterMap.entries()) {
+          if (list.length > 1) {
+            reportsToInsert.push({
+              date,
+              type: 'duplicate_upi',
+              upi_id: list[0].upi_id,
+              amount: list[0].amount,
+              counter_id: list[0].counter_id,
+              details: {
+                source: 'counter',
+                count: list.length,
+                message: `Duplicate Cheque Number '${list[0].upi_id}' loaded in Counter '${list[0].users?.counter_name || 'Unknown'}' (${list.length} records)`
+              }
+            });
+          }
+        }
+
+        // Check duplicate Transaction UTRs in Admin sheets
+        for (const [, list] of adminMap.entries()) {
+          if (list.length > 1) {
+            reportsToInsert.push({
+              date,
+              type: 'duplicate_upi',
+              upi_id: list[0].upi_id,
+              amount: list[0].amount,
+              counter_id: null,
+              details: {
+                source: 'admin',
+                count: list.length,
+                message: `Duplicate Transaction UTR '${list[0].upi_id}' loaded in Admin sheet (${list.length} records)`
+              }
+            });
+          }
+        }
+
+        // strict validation: missing in admin or amount discrepancies
+        for (const [matchKey, cList] of counterMap.entries()) {
+          const aList = adminMap.get(matchKey);
+          if (!aList) {
+            // Missing in Admin completely
+            cList.forEach(c => {
+              reportsToInsert.push({
+                date,
+                type: 'missing_in_admin',
+                upi_id: c.upi_id,
+                amount: c.amount,
+                counter_id: c.counter_id,
+                details: {
+                  counter_name: c.users?.counter_name || 'Unknown',
+                  cheque_date: c.date,
+                  message: `Cheque Number '${c.upi_id}' is available in Counter but missing in Admin sheet.`
+                }
+              });
+            });
+          } else {
+            // Check strict match for amount
+            cList.forEach(c => {
+              const matchingAdmin = aList.find(a => Number(a.amount) === Number(c.amount));
+              if (!matchingAdmin) {
+                // strict match failed on amount
+                reportsToInsert.push({
+                  date,
+                  type: 'missing_in_admin',
+                  upi_id: c.upi_id,
+                  amount: c.amount,
+                  counter_id: c.counter_id,
+                  details: {
+                    counter_name: c.users?.counter_name || 'Unknown',
+                    cheque_amount: c.amount,
+                    admin_amounts: aList.map(a => a.amount),
+                    message: `Cheque Number '${c.upi_id}' matched keys, but amount verification failed! Counter receipt: ${c.amount}, Admin UPI Amount: ${aList.map(a => a.amount).join(', ')}`
+                  }
+                });
+              }
+            });
+          }
+        }
+
+        // strict validation: missing in counter
+        for (const [matchKey, aList] of adminMap.entries()) {
+          const cList = counterMap.get(matchKey);
+          if (!cList) {
+            aList.forEach(a => {
+              reportsToInsert.push({
+                date,
+                type: 'missing_in_counter',
+                upi_id: a.upi_id,
+                amount: a.amount,
+                counter_id: null,
+                details: {
+                  admin_amount: a.amount,
+                  transaction_date: a.date,
+                  message: `Transaction UTR '${a.upi_id}' is available in Admin but missing from all Counter sheets.`
+                }
+              });
+            });
+          }
+        }
+
+        if (reportsToInsert.length > 0) {
+          await supabase.from('reports').insert(reportsToInsert);
+        }
+
+      } catch (err) {
+        console.error(`Comparison error for date ${date}:`, err);
+      }
+    }
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
     setStatus(null);
     setUploading(true);
 
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      try {
-        const data = evt.target?.result;
-        if (!data) throw new Error('Could not read file data.');
+    try {
+      const transactionsToInsert: any[] = [];
+      const uniqueDates = new Set<string>();
 
-        const workbook = XLSX.read(data, { type: 'binary' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        
-        // Parse rows as objects
-        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as any[];
-        if (rows.length === 0) {
-          throw new Error('The selected Excel sheet is empty.');
-        }
+      // Query the database user first to get the correct counter ID
+      const { data: user, error: userError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('username', username)
+        .single();
 
-        // Fuzzy match required headers
-        const chequeNoSynonyms = ['chequeno', 'chequename', 'chequeno.', 'chequeno', 'chequenumber', 'cheque_number', 'transactionutr', 'transactionid', 'upiid', 'utr', 'cheque'];
-        const dateSynonyms = ['chequedate', 'cheque_date', 'date', 'transactiondate', 'transaction_date', 'uploaddate'];
-        const receiptSynonyms = ['receipt', 'amount', 'receiptamount', 'receipt_amount', 'upiamount', 'upiamount'];
+      if (userError || !user) {
+        throw new Error(`Profile query failed for user '${username}': ${userError?.message || 'User not found.'}`);
+      }
 
-        const firstRow = rows[0];
-        const chequeKey = findHeaderKey(firstRow, chequeNoSynonyms);
-        const dateKey = findHeaderKey(firstRow, dateSynonyms);
-        const receiptKey = findHeaderKey(firstRow, receiptSynonyms);
+      let phonepeId = '';
 
-        if (!chequeKey || !dateKey || !receiptKey) {
-          throw new Error(
-            `Header verification failed. Your Excel must contain columns resembling "Cheque Number" (found: ${chequeKey ? 'Yes' : 'No'}), "Cheque Date" (found: ${dateKey ? 'Yes' : 'No'}), and "Receipt" (found: ${receiptKey ? 'Yes' : 'No'}).`
-          );
-        }
-
-        // Map and validate rows
-        const transactionsToInsert: any[] = [];
-        const uniqueDates = new Set<string>();
-
-        // Extract PhonePe ID from column values (e.g. SKC SALES PHONE PE ID (83010307590))
-        let phonepeId = '';
-        for (const row of rows) {
-          for (const key of Object.keys(row)) {
-            const val = String(row[key]).trim();
-            if (val.toUpperCase().includes('PHONE PE ID') || val.toUpperCase().includes('PHONEPE ID') || val.toUpperCase().includes('SKC SALES')) {
-              phonepeId = val;
-              break;
-            }
-          }
-          if (phonepeId) break;
-        }
-
-        // Query the database user first to get the correct counter ID
-        const { data: user, error: userError } = await supabase
-          .from('users')
-          .select('id')
-          .eq('username', username)
-          .single();
-
-        if (userError || !user) {
-          throw new Error(`Profile query failed for user '${username}': ${userError?.message || 'User not found.'}`);
-        }
-
-        if (phonepeId) {
-          const { error: updateError } = await supabase
-            .from('users')
-            .update({ counter_name: phonepeId })
-            .eq('id', user.id);
-          if (updateError) {
-            console.error('Failed to update counter_name with phonepeId:', updateError.message);
-          }
-        }
-
-        rows.forEach((row, index) => {
-          let upiId = String(row[chequeKey]).trim();
-          if (upiId.endsWith('.0')) {
-            upiId = upiId.substring(0, upiId.length - 2);
-          }
-          const rawDate = row[dateKey];
-          const rawAmount = row[receiptKey];
-
-          if (!upiId) return; // skip rows with empty cheque number/UTR
-
-          const dateStr = parseExcelDate(rawDate);
-          const amountNum = parseExcelAmount(rawAmount);
-
-          if (!dateStr) {
-            console.warn(`Row ${index + 2} skipped: Invalid date format.`);
-            return;
-          }
-
-          transactionsToInsert.push({
-            upi_id: upiId,
-            date: dateStr,
-            amount: amountNum,
-            source: 'counter',
-            counter_id: user.id
-          });
-
-          uniqueDates.add(dateStr);
+      // Helper function to read file as binary string asynchronously
+      const readFileAsBinary = (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            if (evt.target?.result) resolve(evt.target.result as string);
+            else reject(new Error('Could not read file data.'));
+          };
+          reader.onerror = () => reject(new Error('FileReader failed to load file.'));
+          reader.readAsBinaryString(file);
         });
+      };
 
-        if (transactionsToInsert.length === 0) {
-          throw new Error('No valid transaction rows found in the spreadsheet.');
+      // Loop through all selected files
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const data = await readFileAsBinary(file);
+        const workbook = XLSX.read(data, { type: 'binary' });
+
+        // Loop through all sheets inside this workbook
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as any[];
+          if (rows.length === 0) continue;
+
+          // Fuzzy match required headers
+          const chequeNoSynonyms = ['chequeno', 'chequename', 'chequeno.', 'chequeno', 'chequenumber', 'cheque_number', 'transactionutr', 'transactionid', 'upiid', 'utr', 'cheque'];
+          const dateSynonyms = ['chequedate', 'cheque_date', 'date', 'transactiondate', 'transaction_date', 'uploaddate'];
+          const receiptSynonyms = ['receipt', 'amount', 'receiptamount', 'receipt_amount', 'upiamount'];
+
+          const firstRow = rows[0];
+          const chequeKey = findHeaderKey(firstRow, chequeNoSynonyms);
+          const dateKey = findHeaderKey(firstRow, dateSynonyms);
+          const receiptKey = findHeaderKey(firstRow, receiptSynonyms);
+
+          // Skip sheets that don't match counter template columns
+          if (!chequeKey || !dateKey || !receiptKey) {
+            console.warn(`Sheet "${sheetName}" in file "${file.name}" skipped: Missing required columns.`);
+            continue;
+          }
+
+          // Extract PhonePe ID from column values (e.g. SKC SALES PHONE PE ID (83010307590))
+          for (const row of rows) {
+            for (const key of Object.keys(row)) {
+              const val = String(row[key]).trim();
+              if (val.toUpperCase().includes('PHONE PE ID') || val.toUpperCase().includes('PHONEPE ID') || val.toUpperCase().includes('SKC SALES')) {
+                phonepeId = val;
+                break;
+              }
+            }
+            if (phonepeId) break;
+          }
+
+          rows.forEach((row, index) => {
+            let upiId = String(row[chequeKey]).trim();
+            if (upiId.endsWith('.0')) {
+              upiId = upiId.substring(0, upiId.length - 2);
+            }
+            const rawDate = row[dateKey];
+            const rawAmount = row[receiptKey];
+
+            if (!upiId) return; // skip rows with empty cheque number/UTR
+
+            const dateStr = parseExcelDate(rawDate);
+            const amountNum = parseExcelAmount(rawAmount);
+
+            if (!dateStr) {
+              console.warn(`Row ${index + 2} in sheet "${sheetName}" skipped: Invalid date format.`);
+              return;
+            }
+
+            transactionsToInsert.push({
+              upi_id: upiId,
+              date: dateStr,
+              amount: amountNum,
+              source: 'counter',
+              counter_id: user.id
+            });
+
+            uniqueDates.add(dateStr);
+          });
         }
+      }
 
-        const dateArray = Array.from(uniqueDates);
+      if (transactionsToInsert.length === 0) {
+        throw new Error('No valid transaction rows found in any of the selected files or sheets.');
+      }
 
-        // 1. Delete previous uploads from this counter on the matched dates to avoid duplicates
+      if (phonepeId) {
+        const { error: updateError } = await supabase
+          .from('users')
+          .update({ counter_name: phonepeId })
+          .eq('id', user.id);
+        if (updateError) {
+          console.error('Failed to update counter_name with phonepeId:', updateError.message);
+        }
+      }
+
+      const dateArray = Array.from(uniqueDates);
+
+      // 1. Fetch existing transaction records for these dates to identify duplicates cleanly by primary key
+      const { data: existingTxs, error: fetchError } = await supabase
+        .from('transactions')
+        .select('id, upi_id')
+        .eq('source', 'counter')
+        .eq('counter_id', user.id)
+        .in('date', dateArray);
+
+      if (fetchError) {
+        throw new Error(`Error checking for duplicate records: ${fetchError.message}`);
+      }
+
+      const incomingUpiIds = new Set(
+        transactionsToInsert.map(t => String(t.upi_id).trim().toLowerCase())
+      );
+
+      const idsToDelete = existingTxs
+        ? existingTxs
+            .filter(t => incomingUpiIds.has(String(t.upi_id).trim().toLowerCase()))
+            .map(t => t.id)
+        : [];
+
+      if (idsToDelete.length > 0) {
         const { error: deleteError } = await supabase
           .from('transactions')
           .delete()
-          .eq('source', 'counter')
-          .eq('counter_id', user.id)
-          .in('date', dateArray);
+          .in('id', idsToDelete);
 
         if (deleteError) {
           throw new Error(`Error clearing old records: ${deleteError.message}`);
         }
-
-        // 2. Insert the fresh parsed transaction records
-        const { error: insertError } = await supabase
-          .from('transactions')
-          .insert(transactionsToInsert);
-
-        if (insertError) {
-          throw new Error(`Database upload failed: ${insertError.message}`);
-        }
-
-        setStatus({
-          type: 'success',
-          message: `Sheet processed successfully! Imported ${transactionsToInsert.length} transactions spanning ${dateArray.length} date(s) (${dateArray.join(', ')}).`
-        });
-
-        fetchCounterProfileAndReports();
-
-      } catch (err: any) {
-        setStatus({
-          type: 'error',
-          message: err.message || 'An unexpected error occurred during processing.'
-        });
-      } finally {
-        setUploading(false);
-        // Reset file input value so same file can be selected again
-        if (fileInputRef.current) fileInputRef.current.value = '';
       }
-    };
 
-    reader.onerror = () => {
-      setStatus({ type: 'error', message: 'FileReader failed to load the file.' });
+      // 2. Insert the fresh parsed transaction records
+      const { error: insertError } = await supabase
+        .from('transactions')
+        .insert(transactionsToInsert);
+
+      if (insertError) {
+        throw new Error(`Database upload failed: ${insertError.message}`);
+      }
+
+      setStatus({
+        type: 'success',
+        message: `Imported ${transactionsToInsert.length} transactions across ${dateArray.length} date(s). Running automatic reconciliation...`
+      });
+
+      // 3. Trigger reconciliation engine calculations for the updated dates
+      await compareTransactionsForDates(dateArray);
+
+      setStatus({
+        type: 'success',
+        message: `All files and sheets processed successfully! Imported ${transactionsToInsert.length} transactions and completed reconciliation across ${dateArray.length} date(s) (${dateArray.join(', ')}).`
+      });
+
+      fetchCounterProfileAndReports();
+
+    } catch (err: any) {
+      setStatus({
+        type: 'error',
+        message: err.message || 'An unexpected error occurred during processing.'
+      });
+    } finally {
       setUploading(false);
-    };
-
-    reader.readAsBinaryString(file);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   return (

@@ -52,6 +52,7 @@ export default function CounterUploadCard({
             ref={fileInputRef} 
             onChange={onFileChange}
             accept=".xlsx, .xls"
+            multiple
             className="hidden" 
           />
           <Button 

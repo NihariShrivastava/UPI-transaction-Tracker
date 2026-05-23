@@ -408,24 +408,32 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           .delete()
           .eq('date', date);
 
+        // STRICT REQUIREMENT: If admin has not uploaded transactions for this date yet,
+        // do not run reconciliation or generate any discrepancy reports.
+        if (adminTxs.length === 0) {
+          continue;
+        }
+
         const reportsToInsert: any[] = [];
 
-        // Group counter transactions by trimmed lower UTR / Cheque No
+        // Group counter transactions by trimmed lower UTR / Cheque No (last 10 characters for matching)
         const counterMap = new Map<string, any[]>();
         counterTxs.forEach(t => {
           let key = String(t.upi_id).trim().toLowerCase();
           if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
-          if (!counterMap.has(key)) counterMap.set(key, []);
-          counterMap.get(key)!.push(t);
+          const matchKey = key.slice(-10);
+          if (!counterMap.has(matchKey)) counterMap.set(matchKey, []);
+          counterMap.get(matchKey)!.push(t);
         });
 
-        // Group admin transactions by trimmed lower UTR
+        // Group admin transactions by trimmed lower UTR (last 10 characters for matching)
         const adminMap = new Map<string, any[]>();
         adminTxs.forEach(t => {
           let key = String(t.upi_id).trim().toLowerCase();
           if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
-          if (!adminMap.has(key)) adminMap.set(key, []);
-          adminMap.get(key)!.push(t);
+          const matchKey = key.slice(-10);
+          if (!adminMap.has(matchKey)) adminMap.set(matchKey, []);
+          adminMap.get(matchKey)!.push(t);
         });
 
         // Check duplicate Cheque Numbers in Counter sheets
@@ -636,7 +644,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         }
 
         // Fuzzy match required headers
-        const utrSynonyms = ['transactionutr', 'utr', 'transactionid', 'upiid', 'chequeno', 'chequenumber', 'cheque_number', 'referenceno', 'refno'];
+        const utrSynonyms = ['phonepereferenceid', 'phonepeid', 'phonepe', 'phonepereference', 'transactionutr', 'utr', 'transactionid', 'upiid', 'chequeno', 'chequenumber', 'cheque_number', 'referenceno', 'refno'];
         const dateSynonyms = ['transactiondate', 'transaction_date', 'date', 'chequedate', 'cheque_date', 'uploaddate'];
         const amountSynonyms = ['upiamount', 'amount', 'receipt', 'receiptamount', 'receipt_amount', 'value'];
 
@@ -686,15 +694,36 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
         const dateArray = Array.from(uniqueDates);
 
-        // Delete old admin transaction uploads for these dates to avoid duplicates
-        const { error: deleteError } = await supabase
+        // Fetch existing admin transaction records for these dates to identify duplicates cleanly by primary key
+        const { data: existingTxs, error: fetchError } = await supabase
           .from('transactions')
-          .delete()
+          .select('id, upi_id')
           .eq('source', 'admin')
           .in('date', dateArray);
 
-        if (deleteError) {
-          throw new Error(`Error clearing old admin records: ${deleteError.message}`);
+        if (fetchError) {
+          throw new Error(`Error checking for duplicate admin records: ${fetchError.message}`);
+        }
+
+        const incomingUpiIds = new Set(
+          transactionsToInsert.map(t => String(t.upi_id).trim().toLowerCase())
+        );
+
+        const idsToDelete = existingTxs
+          ? existingTxs
+              .filter(t => incomingUpiIds.has(String(t.upi_id).trim().toLowerCase()))
+              .map(t => t.id)
+          : [];
+
+        if (idsToDelete.length > 0) {
+          const { error: deleteError } = await supabase
+            .from('transactions')
+            .delete()
+            .in('id', idsToDelete);
+
+          if (deleteError) {
+            throw new Error(`Error clearing old admin records: ${deleteError.message}`);
+          }
         }
 
         // Insert new records
