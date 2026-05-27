@@ -157,18 +157,29 @@ export default function CounterDashboard({ username, onLogout }: { username: str
   const compareTransactionsForDates = async (dates: string[]) => {
     for (const date of dates) {
       try {
-        const { data: txs, error: txError } = await supabase
+        const targetDateObj = new Date(date);
+        const startDate = new Date(targetDateObj);
+        startDate.setDate(startDate.getDate() - 3);
+        const endDate = new Date(targetDateObj);
+        endDate.setDate(endDate.getDate() + 3);
+
+        const startStr = startDate.toISOString().split('T')[0];
+        const endStr = endDate.toISOString().split('T')[0];
+
+        const { data: windowTxs, error: txError } = await supabase
           .from('transactions')
           .select('*, users(counter_name)')
-          .eq('date', date);
+          .gte('date', startStr)
+          .lte('date', endStr);
 
-        if (txError || !txs) {
+        if (txError || !windowTxs) {
           console.error(`Error fetching transactions for comparison on ${date}:`, txError?.message);
           continue;
         }
 
-        const counterTxs = txs.filter(t => t.source === 'counter');
-        const adminTxs = txs.filter(t => t.source === 'admin');
+        const targetTxs = windowTxs.filter(t => t.date === date);
+        const targetAdminTxs = targetTxs.filter(t => t.source === 'admin');
+        const targetCounterTxs = targetTxs.filter(t => t.source === 'counter');
 
         // Clear pre-existing reports to prevent drift/overlap
         await supabase
@@ -178,74 +189,132 @@ export default function CounterDashboard({ username, onLogout }: { username: str
 
         // STRICT REQUIREMENT: If admin has not uploaded transactions for this date yet,
         // do not run reconciliation or generate any discrepancy reports.
-        if (adminTxs.length === 0) {
+        if (targetAdminTxs.length === 0) {
           continue;
         }
 
+        const counterTxsWindow = windowTxs.filter(t => t.source === 'counter');
+        const adminTxsWindow = windowTxs.filter(t => t.source === 'admin');
+
         const reportsToInsert: any[] = [];
 
-        // Group counter transactions by trimmed lower UTR / Cheque No (last 10 characters for matching)
+        // Group counter transactions by exact normalized Cheque No
         const counterMap = new Map<string, any[]>();
-        counterTxs.forEach(t => {
-          let key = String(t.upi_id).trim().toLowerCase();
-          if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
-          const matchKey = key.slice(-10);
-          if (!counterMap.has(matchKey)) counterMap.set(matchKey, []);
-          counterMap.get(matchKey)!.push(t);
+        counterTxsWindow.forEach(t => {
+          const keys = String(t.upi_id).split(',');
+          keys.forEach(rawKey => {
+            let key = rawKey.trim().toLowerCase();
+            if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
+            if (!counterMap.has(key)) counterMap.set(key, []);
+            counterMap.get(key)!.push(t);
+          });
         });
 
-        // Group admin transactions by trimmed lower UTR (last 10 characters for matching)
-        const adminMap = new Map<string, any[]>();
-        adminTxs.forEach(t => {
-          let key = String(t.upi_id).trim().toLowerCase();
-          if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
-          const matchKey = key.slice(-10);
-          if (!adminMap.has(matchKey)) adminMap.set(matchKey, []);
-          adminMap.get(matchKey)!.push(t);
+        // Group admin transactions by exact UTR and last 10 digits
+        const adminExactMap = new Map<string, any[]>();
+        const adminLast10Map = new Map<string, any[]>();
+        adminTxsWindow.forEach(t => {
+          const keys = String(t.upi_id).split(',');
+          keys.forEach(rawKey => {
+            let key = rawKey.trim().toLowerCase();
+            if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
+            
+            if (!adminExactMap.has(key)) adminExactMap.set(key, []);
+            adminExactMap.get(key)!.push(t);
+            
+            const last10 = key.slice(-10);
+            if (last10 !== key) {
+              if (!adminLast10Map.has(last10)) adminLast10Map.set(last10, []);
+              adminLast10Map.get(last10)!.push(t);
+            }
+          });
         });
 
         // Check duplicate Cheque Numbers in Counter sheets
         for (const [, list] of counterMap.entries()) {
-          if (list.length > 1) {
-            reportsToInsert.push({
-              date,
-              type: 'duplicate_upi',
-              upi_id: list[0].upi_id,
-              amount: list[0].amount,
-              counter_id: list[0].counter_id,
-              details: {
-                source: 'counter',
-                count: list.length,
-                message: `Duplicate Cheque Number '${list[0].upi_id}' loaded in Counter '${list[0].users?.counter_name || 'Unknown'}' (${list.length} records)`
+          const targetList = list.filter(t => t.date === date);
+          if (targetList.length > 0 && list.length > 1) {
+            targetList.forEach(t => {
+              if (!reportsToInsert.find(r => r.type === 'duplicate_upi' && r.upi_id === t.upi_id && r.source_id === t.id)) {
+                reportsToInsert.push({
+                  date,
+                  type: 'duplicate_upi',
+                  upi_id: t.upi_id,
+                  amount: t.amount,
+                  counter_id: t.counter_id,
+                  source_id: t.id,
+                  details: {
+                    source: 'counter',
+                    count: list.length,
+                    message: `Duplicate Cheque Number '${t.upi_id}' loaded in Counter '${t.users?.counter_name || 'Unknown'}' (${list.length} records)`
+                  }
+                });
               }
             });
           }
         }
 
         // Check duplicate Transaction UTRs in Admin sheets
-        for (const [, list] of adminMap.entries()) {
-          if (list.length > 1) {
-            reportsToInsert.push({
-              date,
-              type: 'duplicate_upi',
-              upi_id: list[0].upi_id,
-              amount: list[0].amount,
-              counter_id: null,
-              details: {
-                source: 'admin',
-                count: list.length,
-                message: `Duplicate Transaction UTR '${list[0].upi_id}' loaded in Admin sheet (${list.length} records)`
+        for (const [, list] of adminExactMap.entries()) {
+          const targetList = list.filter(t => t.date === date);
+          if (targetList.length > 0 && list.length > 1) {
+            targetList.forEach(t => {
+              if (!reportsToInsert.find(r => r.type === 'duplicate_upi' && r.upi_id === t.upi_id && r.source_id === t.id)) {
+                reportsToInsert.push({
+                  date,
+                  type: 'duplicate_upi',
+                  upi_id: t.upi_id,
+                  amount: t.amount,
+                  counter_id: null,
+                  source_id: t.id,
+                  details: {
+                    source: 'admin',
+                    count: list.length,
+                    message: `Duplicate Transaction UTR '${t.upi_id}' loaded in Admin sheet (${list.length} records)`
+                  }
+                });
               }
             });
           }
         }
 
         // strict validation: missing in admin or amount discrepancies
-        for (const [matchKey, cList] of counterMap.entries()) {
-          const aList = adminMap.get(matchKey);
-          if (!aList) {
-            // Missing in Admin completely
-            cList.forEach(c => {
+        targetCounterTxs.forEach(c => {
+          const keys = String(c.upi_id).split(',').map(k => {
+            let key = k.trim().toLowerCase();
+            if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
+            return key;
+          });
+
+          let matchedAdminList: any[] | undefined = undefined;
+
+          for (const cKey of keys) {
+            let aList = adminLast10Map.get(cKey);
+            if (!aList) {
+              aList = adminExactMap.get(cKey);
+            }
+            if (aList) {
+              matchedAdminList = aList;
+              break;
+            }
+          }
+
+          if (!matchedAdminList) {
+            reportsToInsert.push({
+              date,
+              type: 'missing_in_admin',
+              upi_id: c.upi_id,
+              amount: c.amount,
+              counter_id: c.counter_id,
+              details: {
+                counter_name: c.users?.counter_name || 'Unknown',
+                cheque_date: c.date,
+                message: `Cheque Number '${c.upi_id}' is available in Counter but missing in Admin sheet.`
+              }
+            });
+          } else {
+            const matchingAdmin = matchedAdminList.find(a => Number(a.amount) === Number(c.amount));
+            if (!matchingAdmin) {
               reportsToInsert.push({
                 date,
                 type: 'missing_in_admin',
@@ -254,58 +323,57 @@ export default function CounterDashboard({ username, onLogout }: { username: str
                 counter_id: c.counter_id,
                 details: {
                   counter_name: c.users?.counter_name || 'Unknown',
-                  cheque_date: c.date,
-                  message: `Cheque Number '${c.upi_id}' is available in Counter but missing in Admin sheet.`
+                  cheque_amount: c.amount,
+                  admin_amounts: matchedAdminList.map(a => a.amount),
+                  message: `Cheque Number '${c.upi_id}' matched keys, but amount verification failed! Counter receipt: ${c.amount}, Admin UPI Amount: ${matchedAdminList.map(a => a.amount).join(', ')}`
                 }
               });
-            });
-          } else {
-            // Check strict match for amount
-            cList.forEach(c => {
-              const matchingAdmin = aList.find(a => Number(a.amount) === Number(c.amount));
-              if (!matchingAdmin) {
-                // strict match failed on amount
-                reportsToInsert.push({
-                  date,
-                  type: 'missing_in_admin',
-                  upi_id: c.upi_id,
-                  amount: c.amount,
-                  counter_id: c.counter_id,
-                  details: {
-                    counter_name: c.users?.counter_name || 'Unknown',
-                    cheque_amount: c.amount,
-                    admin_amounts: aList.map(a => a.amount),
-                    message: `Cheque Number '${c.upi_id}' matched keys, but amount verification failed! Counter receipt: ${c.amount}, Admin UPI Amount: ${aList.map(a => a.amount).join(', ')}`
-                  }
-                });
+            }
+          }
+        });
+
+        // strict validation: missing in counter
+        targetAdminTxs.forEach(a => {
+          const keys = String(a.upi_id).split(',').map(k => {
+            let key = k.trim().toLowerCase();
+            if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
+            return key;
+          });
+
+          let matchedCounterList: any[] | undefined = undefined;
+
+          for (const aKey of keys) {
+            let cList = counterMap.get(aKey);
+            if (!cList && aKey.length > 10) {
+              cList = counterMap.get(aKey.slice(-10));
+            }
+            if (cList) {
+              matchedCounterList = cList;
+              break;
+            }
+          }
+
+          if (!matchedCounterList) {
+            reportsToInsert.push({
+              date,
+              type: 'missing_in_counter',
+              upi_id: a.upi_id,
+              amount: a.amount,
+              counter_id: null,
+              details: {
+                admin_amount: a.amount,
+                transaction_date: a.date,
+                message: `Transaction UTR '${a.upi_id}' is available in Admin but missing from all Counter sheets.`
               }
             });
           }
-        }
+        });
 
-        // strict validation: missing in counter
-        for (const [matchKey, aList] of adminMap.entries()) {
-          const cList = counterMap.get(matchKey);
-          if (!cList) {
-            aList.forEach(a => {
-              reportsToInsert.push({
-                date,
-                type: 'missing_in_counter',
-                upi_id: a.upi_id,
-                amount: a.amount,
-                counter_id: null,
-                details: {
-                  admin_amount: a.amount,
-                  transaction_date: a.date,
-                  message: `Transaction UTR '${a.upi_id}' is available in Admin but missing from all Counter sheets.`
-                }
-              });
-            });
-          }
-        }
+        // Remove source_id before inserting into database
+        const finalReports = reportsToInsert.map(({ source_id, ...report }) => report);
 
-        if (reportsToInsert.length > 0) {
-          await supabase.from('reports').insert(reportsToInsert);
+        if (finalReports.length > 0) {
+          await supabase.from('reports').insert(finalReports);
         }
 
       } catch (err) {
