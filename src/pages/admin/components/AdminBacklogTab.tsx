@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Archive, Calendar, X, RefreshCw, Trash2, Users, Loader2 } from 'lucide-react';
+import { Archive, RefreshCw, Trash2, Users, Loader2 } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '../../../components/ui/Table';
 import { Card, CardHeader, CardTitle, CardContent } from '../../../components/ui/Card';
