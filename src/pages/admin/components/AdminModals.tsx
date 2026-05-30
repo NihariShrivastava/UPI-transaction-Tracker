@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sparkles, Loader2, Search } from 'lucide-react';
+import { X, Sparkles, Loader2, Search, AlertTriangle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '../../../components/ui/Table';
@@ -8,8 +8,6 @@ import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '.
 interface AddCounterModalProps {
   isOpen: boolean;
   onClose: () => void;
-  newCounterName: string;
-  setNewCounterName: (val: string) => void;
   newUsername: string;
   setNewUsername: (val: string) => void;
   newPassword: string;
@@ -23,6 +21,8 @@ interface ReportGroupDetailsModalProps {
   reportsFilterDate: string;
   onResolveReport: (id: number) => void;
   onEditReport: (id: number, newUpiId: string, newAmount: number) => Promise<void>;
+  onMatchReport?: (id: number) => Promise<boolean>;
+  onMatchAllReports?: () => Promise<{ allMatched: boolean, remainingCount: number }>;
 }
 
 interface BatchDetailsModalProps {
@@ -37,8 +37,6 @@ interface BatchDetailsModalProps {
 export function AddCounterModal({
   isOpen,
   onClose,
-  newCounterName,
-  setNewCounterName,
   newUsername,
   setNewUsername,
   newPassword,
@@ -65,19 +63,11 @@ export function AddCounterModal({
               <CardContent className="pt-6">
                 <form onSubmit={onSubmit} className="space-y-4">
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-text-secondary">Counter Name</label>
-                    <input 
-                      type="text" required value={newCounterName} onChange={e => setNewCounterName(e.target.value)}
-                      className="w-full bg-[#000000] border border-[#222222] rounded-xl h-11 px-4 text-text-primary focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition-all"
-                      placeholder="e.g. Counter 1"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-text-secondary">Username</label>
+                    <label className="text-sm font-medium text-text-secondary">Username / Counter Name</label>
                     <input 
                       type="text" required value={newUsername} onChange={e => setNewUsername(e.target.value)}
                       className="w-full bg-[#000000] border border-[#222222] rounded-xl h-11 px-4 text-text-primary focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition-all"
-                      placeholder="e.g. counter_user"
+                      placeholder="e.g. Counter_Sales"
                     />
                   </div>
                   <div className="space-y-2">
@@ -107,13 +97,19 @@ export function ReportGroupDetailsModal({
   onClose,
   reportsFilterDate,
   onResolveReport,
-  onEditReport
+  onEditReport,
+  onMatchReport,
+  onMatchAllReports
 }: ReportGroupDetailsModalProps) {
   const [selectedUpiId, setSelectedUpiId] = useState('');
   const [editingReportId, setEditingReportId] = useState<number | null>(null);
   const [editUpiId, setEditUpiId] = useState('');
   const [editAmount, setEditAmount] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isMatching, setIsMatching] = useState<{ [key: number]: boolean }>({});
+  const [isMatchingAll, setIsMatchingAll] = useState(false);
+  const [editedReportIds, setEditedReportIds] = useState<number[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const uniqueUpiIds = group && group.counterName
     ? [group.counterName]
@@ -133,8 +129,26 @@ export function ReportGroupDetailsModal({
             initial={{ opacity: 0, scale: 0.95, y: 15 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 15 }}
-            className="w-full max-w-4xl max-h-[85vh] flex flex-col bg-[#111111] border border-[#222222] shadow-[0_0_50px_rgba(139,92,246,0.15)] rounded-2xl overflow-hidden animate-in fade-in zoom-in duration-300"
+            className="relative w-full max-w-4xl max-h-[85vh] flex flex-col bg-[#111111] border border-[#222222] shadow-[0_0_50px_rgba(139,92,246,0.15)] rounded-2xl overflow-hidden animate-in fade-in zoom-in duration-300"
           >
+            {/* Error Popup */}
+            <AnimatePresence>
+              {errorMessage && (
+                <motion.div
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-red-500/10 border border-red-500/50 text-red-400 px-4 py-3 rounded-xl shadow-[0_0_20px_rgba(239,68,68,0.2)] backdrop-blur-md max-w-sm w-full"
+                >
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <span className="text-sm font-semibold">{errorMessage}</span>
+                  <button onClick={() => setErrorMessage(null)} className="ml-auto hover:text-white p-1">
+                    <X className="w-4 h-4" />
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Header */}
             <div className="flex items-center justify-between p-6 border-b border-[#222222] bg-[#161616]">
               <div>
@@ -204,7 +218,15 @@ export function ReportGroupDetailsModal({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredReports.map((report: any, idx: number) => {
+                    {[...filteredReports]
+                      .sort((a, b) => {
+                        const aEdited = editedReportIds.includes(a.id);
+                        const bEdited = editedReportIds.includes(b.id);
+                        if (aEdited && !bEdited) return -1;
+                        if (!aEdited && bEdited) return 1;
+                        return 0;
+                      })
+                      .map((report: any, idx: number) => {
                       const isEditing = editingReportId === report.id;
                       return (
                         <TableRow key={report.id} className="hover:bg-[#222222]/20 border-b border-[#222222]/50 transition-colors animate-in slide-in-from-left duration-200">
@@ -237,8 +259,17 @@ export function ReportGroupDetailsModal({
                               `₹${Number(report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                             )}
                           </TableCell>
-                          <TableCell className="text-xs text-text-secondary leading-relaxed max-w-[280px] truncate" title={report.details?.message}>
-                            {report.details?.message || `Missing in Admin sheet.`}
+                          <TableCell className="text-xs text-text-secondary leading-relaxed max-w-[280px]">
+                            <div className="flex flex-col gap-1.5 items-start w-full">
+                              <span className="truncate w-full block" title={report.details?.message}>
+                                {report.details?.message || `Missing in Admin sheet.`}
+                              </span>
+                              {report.type === 'duplicate_upi' && report.details?.count && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded bg-orange-500/10 border border-orange-500/20 text-orange-400 font-bold text-[10px] tracking-wider uppercase shadow-[0_0_10px_rgba(249,115,22,0.1)]">
+                                  {report.details.count} Duplicates Found
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="text-right">
                             {isEditing ? (
@@ -255,6 +286,7 @@ export function ReportGroupDetailsModal({
                                     setIsSaving(true);
                                     try {
                                       await onEditReport(report.id, editUpiId, Number(editAmount));
+                                      setEditedReportIds(prev => [report.id, ...prev.filter(id => id !== report.id)]);
                                       setEditingReportId(null);
                                     } catch (e) {
                                       console.error(e);
@@ -293,10 +325,23 @@ export function ReportGroupDetailsModal({
                                 <Button 
                                   variant="ghost" 
                                   size="sm" 
-                                  onClick={() => onResolveReport(report.id)}
+                                  disabled={isMatching[report.id]}
+                                  onClick={async () => {
+                                    if (onMatchReport) {
+                                      setIsMatching(prev => ({ ...prev, [report.id]: true }));
+                                      const isMatched = await onMatchReport(report.id);
+                                      setIsMatching(prev => ({ ...prev, [report.id]: false }));
+                                      if (!isMatched) {
+                                        setErrorMessage("This entry did not match any uploaded Admin Excel records.");
+                                        setTimeout(() => setErrorMessage(null), 5000);
+                                      }
+                                    } else {
+                                      onResolveReport(report.id);
+                                    }
+                                  }}
                                   className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 px-3 font-semibold rounded-lg text-xs h-8"
                                 >
-                                  Resolve
+                                  {isMatching[report.id] ? "Matching..." : "Match"}
                                 </Button>
                               </div>
                             )}
@@ -310,7 +355,24 @@ export function ReportGroupDetailsModal({
             </div>
 
             {/* Footer */}
-            <div className="p-4 border-t border-[#222222] bg-[#161616] flex justify-end">
+            <div className="p-4 border-t border-[#222222] bg-[#161616] flex justify-end gap-3">
+              {onMatchAllReports && (
+                <Button 
+                  onClick={async () => {
+                    setIsMatchingAll(true);
+                    const result = await onMatchAllReports();
+                    setIsMatchingAll(false);
+                    if (!result.allMatched) {
+                      setErrorMessage(`${result.remainingCount} entries did not match any Admin Excel records.`);
+                      setTimeout(() => setErrorMessage(null), 5000);
+                    }
+                  }} 
+                  disabled={isMatchingAll || filteredReports.length === 0}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-lg font-semibold h-10 px-6"
+                >
+                  {isMatchingAll ? "Matching..." : "Match All Entry"}
+                </Button>
+              )}
               <Button 
                 onClick={onClose} 
                 className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl shadow-lg font-semibold h-10 px-6"

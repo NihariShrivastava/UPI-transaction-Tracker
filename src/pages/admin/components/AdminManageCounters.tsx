@@ -7,7 +7,7 @@ interface AdminManageCountersProps {
   counters: any[];
   loading: boolean;
   onAddClick: () => void;
-  onEditClick: (id: number, currentName: string) => void;
+  onEditClick: (id: number, currentUsername: string) => void;
   onDeleteClick: (id: number) => void;
 }
 
@@ -48,8 +48,7 @@ export default function AdminManageCounters({
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent border-b border-[#222222]">
-              <TableHead className="w-[200px]">Counter Name</TableHead>
-              <TableHead>Username</TableHead>
+              <TableHead className="w-[250px]">Username / Counter Name</TableHead>
               <TableHead>Password</TableHead>
               <TableHead className="text-center">Logins</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -58,7 +57,7 @@ export default function AdminManageCounters({
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-10 text-text-secondary">
+                <TableCell colSpan={4} className="text-center py-10 text-text-secondary">
                   <div className="flex items-center justify-center gap-2">
                     <Loader2 className="w-5 h-5 animate-spin text-purple-400" />
                     <span>Loading counters from database...</span>
@@ -67,15 +66,14 @@ export default function AdminManageCounters({
               </TableRow>
             ) : counters.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-10 text-text-secondary">
+                <TableCell colSpan={4} className="text-center py-10 text-text-secondary">
                   No counters found in system. Create one to get started!
                 </TableCell>
               </TableRow>
             ) : (
               counters.map((counter) => (
                 <TableRow key={counter.id} className="group border-b border-[#222222]/50 hover:bg-[#222222]/20 transition-colors">
-                  <TableCell className="font-semibold text-white">{counter.name}</TableCell>
-                  <TableCell className="text-text-secondary font-mono">{counter.username}</TableCell>
+                  <TableCell className="font-semibold text-white">{counter.username}</TableCell>
                   <TableCell className="text-text-secondary font-mono tracking-wider">{counter.password}</TableCell>
                   <TableCell className="text-center">
                     <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-[#222222] text-sm font-semibold text-purple-400 border border-[#333333]">
@@ -87,7 +85,7 @@ export default function AdminManageCounters({
                       variant="ghost" 
                       size="sm" 
                       className="font-semibold text-text-secondary hover:text-white" 
-                      onClick={() => onEditClick(counter.id, counter.name)}
+                      onClick={() => onEditClick(counter.id, counter.username)}
                     >
                       Edit
                     </Button>

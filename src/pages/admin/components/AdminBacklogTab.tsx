@@ -8,12 +8,16 @@ import { Card, CardHeader, CardTitle, CardContent } from '../../../components/ui
 interface AdminBacklogTabProps {
   counterUploads: any[];
   adminUploads: any[];
-  backlogFilterDate: string;
-  setBacklogFilterDate: (date: string) => void;
+  backlogStartDate: string;
+  backlogEndDate: string;
+  setBacklogStartDate: (date: string) => void;
+  setBacklogEndDate: (date: string) => void;
   backlogLoading: boolean;
   backlogSubTab: 'counter' | 'admin';
   setBacklogSubTab: (tab: 'counter' | 'admin') => void;
-  onWipeBacklog: () => void;
+  onWipeAdminBacklog: () => void;
+  onWipeCounterBacklog: () => void;
+  onDeleteBatch: (date: string, source: 'counter' | 'admin', counter_id: number | null) => void;
   onOpenBatchDetails: (batch: any) => void;
   selectedBacklogCounter: any;
   setSelectedBacklogCounter: (counter: any) => void;
@@ -23,39 +27,56 @@ interface AdminBacklogTabProps {
 export default function AdminBacklogTab({
   counterUploads,
   adminUploads,
-  backlogFilterDate,
-  setBacklogFilterDate,
+  backlogStartDate,
+  backlogEndDate,
+  setBacklogStartDate,
+  setBacklogEndDate,
   backlogLoading,
   backlogSubTab,
   setBacklogSubTab,
-  onWipeBacklog,
+  onWipeAdminBacklog,
+  onWipeCounterBacklog,
+  onDeleteBatch,
   onOpenBatchDetails,
   selectedBacklogCounter,
   setSelectedBacklogCounter,
   onRefreshLogs
 }: AdminBacklogTabProps) {
-  const backlogDateInputRef = useRef<HTMLInputElement>(null);
-  const [tempFilterDate, setTempFilterDate] = useState(backlogFilterDate);
+  const backlogStartDateInputRef = useRef<HTMLInputElement>(null);
+  const backlogEndDateInputRef = useRef<HTMLInputElement>(null);
+  
+  const [tempStartDate, setTempStartDate] = useState(backlogStartDate);
+  const [tempEndDate, setTempEndDate] = useState(backlogEndDate);
 
   useEffect(() => {
-    setTempFilterDate(backlogFilterDate);
-  }, [backlogFilterDate]);
+    setTempStartDate(backlogStartDate);
+    setTempEndDate(backlogEndDate);
+  }, [backlogStartDate, backlogEndDate]);
 
   const handleApplyDate = () => {
-    setBacklogFilterDate(tempFilterDate);
+    setBacklogStartDate(tempStartDate);
+    setBacklogEndDate(tempEndDate);
   };
 
   const handleClearDate = () => {
-    setTempFilterDate('');
-    setBacklogFilterDate('');
+    setTempStartDate('');
+    setTempEndDate('');
+    setBacklogStartDate('');
+    setBacklogEndDate('');
+  };
+
+  const isDateInRange = (dateStr: string) => {
+    if (!backlogStartDate && !backlogEndDate) return true;
+    const d = new Date(dateStr).getTime();
+    const s = backlogStartDate ? new Date(backlogStartDate).getTime() : 0;
+    const e = backlogEndDate ? new Date(backlogEndDate).getTime() : Infinity;
+    return d >= s && d <= e;
   };
 
   // Filter helper applied inside the component to keep parent state simple
   const filteredCounterUploads = counterUploads
     .map(log => {
-      const matchedUploads = backlogFilterDate 
-        ? log.uploads.filter((u: any) => u.date === backlogFilterDate)
-        : log.uploads;
+      const matchedUploads = log.uploads.filter((u: any) => isDateInRange(u.date));
       const totalCount = matchedUploads.reduce((acc: number, curr: any) => acc + curr.count, 0);
       return {
         ...log,
@@ -65,9 +86,7 @@ export default function AdminBacklogTab({
     })
     .filter(log => log.uploads.length > 0);
 
-  const filteredAdminUploads = backlogFilterDate
-    ? adminUploads.filter(log => log.date === backlogFilterDate)
-    : adminUploads;
+  const filteredAdminUploads = adminUploads.filter(log => isDateInRange(log.date));
 
   return (
     <Card className="bg-[#111111] border-[#222222] animate-in fade-in slide-in-from-bottom-4 rounded-2xl shadow-xl overflow-hidden">
@@ -110,49 +129,50 @@ export default function AdminBacklogTab({
             </button>
           </div>
 
-          {/* Date Filter input */}
+          {/* Date Range Filter inputs */}
           <div className="flex flex-wrap items-center gap-2">
             <div 
               onClick={() => {
-                try {
-                  backlogDateInputRef.current?.showPicker();
-                } catch (e) {
-                  backlogDateInputRef.current?.focus();
-                }
+                try { backlogStartDateInputRef.current?.showPicker(); } catch (e) { backlogStartDateInputRef.current?.focus(); }
               }}
               className="flex items-center gap-2 bg-[#000000] border border-[#222222] rounded-xl px-3 py-1.5 cursor-pointer hover:border-purple-500/50 transition-colors"
             >
-              <Calendar className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+              <span className="text-xs text-text-secondary">From</span>
               <input 
                 type="date" 
-                ref={backlogDateInputRef}
-                value={tempFilterDate}
-                onChange={e => setTempFilterDate(e.target.value)}
+                ref={backlogStartDateInputRef}
+                value={tempStartDate}
+                onChange={e => setTempStartDate(e.target.value)}
                 onClick={e => e.stopPropagation()}
                 className="bg-transparent text-xs text-white focus:outline-none cursor-pointer" 
               />
-              {tempFilterDate && (
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleClearDate();
-                  }} 
-                  className="text-text-secondary hover:text-white ml-1 font-bold"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              )}
+            </div>
+            <div 
+              onClick={() => {
+                try { backlogEndDateInputRef.current?.showPicker(); } catch (e) { backlogEndDateInputRef.current?.focus(); }
+              }}
+              className="flex items-center gap-2 bg-[#000000] border border-[#222222] rounded-xl px-3 py-1.5 cursor-pointer hover:border-purple-500/50 transition-colors"
+            >
+              <span className="text-xs text-text-secondary">To</span>
+              <input 
+                type="date" 
+                ref={backlogEndDateInputRef}
+                value={tempEndDate}
+                onChange={e => setTempEndDate(e.target.value)}
+                onClick={e => e.stopPropagation()}
+                className="bg-transparent text-xs text-white focus:outline-none cursor-pointer" 
+              />
             </div>
 
             <Button
               onClick={handleApplyDate}
-              disabled={!tempFilterDate}
+              disabled={!tempStartDate && !tempEndDate}
               className="bg-purple-600 hover:bg-purple-700 disabled:bg-[#222222] disabled:text-text-secondary text-white font-bold text-xs px-4 h-[34px] rounded-xl transition-all"
             >
               Apply
             </Button>
 
-            {backlogFilterDate && (
+            {(backlogStartDate || backlogEndDate) && (
               <Button
                 onClick={handleClearDate}
                 variant="ghost"
@@ -174,17 +194,30 @@ export default function AdminBacklogTab({
             <RefreshCw className="w-4 h-4 text-purple-400" />
           </Button>
 
-          {/* Giant Database Backlog Wipe Button */}
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={onWipeBacklog} 
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600/10 border border-red-500/20 hover:bg-red-600 text-red-400 hover:text-white transition-all font-bold text-xs h-9 shadow-md"
-            title="Permanently wipe entire transaction database and discrepancy reports backlog"
-          >
-            <Trash2 className="w-4 h-4" />
-            Wipe Database Backlog
-          </Button>
+          {/* Wipe Database Backlog Button (Contextual) */}
+          {backlogSubTab === 'counter' ? (
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={onWipeCounterBacklog} 
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600/10 border border-red-500/20 hover:bg-red-600 text-red-400 hover:text-white transition-all font-bold text-xs h-9 shadow-md"
+              title="Permanently wipe all Counter transaction database and reports backlog"
+            >
+              <Trash2 className="w-4 h-4" />
+              Wipe Counter Backlog
+            </Button>
+          ) : (
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={onWipeAdminBacklog} 
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600/10 border border-red-500/20 hover:bg-red-600 text-red-400 hover:text-white transition-all font-bold text-xs h-9 shadow-md"
+              title="Permanently wipe all Admin transaction database and reports backlog"
+            >
+              <Trash2 className="w-4 h-4" />
+              Wipe Admin Backlog
+            </Button>
+          )}
         </div>
       </CardHeader>
 
@@ -298,19 +331,30 @@ export default function AdminBacklogTab({
                                   </span>
                                 </TableCell>
                                 <TableCell className="text-right">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => onOpenBatchDetails({
-                                      counter_id: selectedBacklogCounter.counterId,
-                                      counter_name: selectedBacklogCounter.counterName,
-                                      date: upload.date,
-                                      source: 'counter'
-                                    })}
-                                    className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-4 font-bold rounded-xl text-xs h-8 transition-all"
-                                  >
-                                    View Transactions
-                                  </Button>
+                                  <div className="flex justify-end gap-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => onOpenBatchDetails({
+                                        counter_id: selectedBacklogCounter.counterId,
+                                        counter_name: selectedBacklogCounter.counterName,
+                                        date: upload.date,
+                                        source: 'counter'
+                                      })}
+                                      className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-4 font-bold rounded-xl text-xs h-8 transition-all"
+                                    >
+                                      View Transactions
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => onDeleteBatch(upload.date, 'counter', selectedBacklogCounter.counterId)}
+                                      className="text-red-400 hover:text-red-300 hover:bg-red-500/10 px-3 font-bold rounded-xl h-8 transition-all"
+                                      title="Delete transactions for this day"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  </div>
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -367,19 +411,30 @@ export default function AdminBacklogTab({
                         </span>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => onOpenBatchDetails({
-                            counter_id: null,
-                            counter_name: 'Main Admin Sheet',
-                            date: log.date,
-                            source: 'admin'
-                          })}
-                          className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-4 font-bold rounded-xl text-xs h-8 transition-all"
-                        >
-                          View Transactions
-                        </Button>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onOpenBatchDetails({
+                              counter_id: null,
+                              counter_name: 'Main Admin Sheet',
+                              date: log.date,
+                              source: 'admin'
+                            })}
+                            className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-4 font-bold rounded-xl text-xs h-8 transition-all"
+                          >
+                            View Transactions
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onDeleteBatch(log.date, 'admin', null)}
+                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10 px-3 font-bold rounded-xl h-8 transition-all"
+                            title="Delete transactions for this day"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))

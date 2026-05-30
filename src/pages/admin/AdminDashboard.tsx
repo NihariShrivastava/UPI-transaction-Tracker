@@ -81,7 +81,6 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   
   // Add Counter Dialog State
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [newCounterName, setNewCounterName] = useState('');
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
 
@@ -100,7 +99,8 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [reportsLoading, setReportsLoading] = useState(false);
 
   // Live Backlog upload logs state
-  const [backlogFilterDate, setBacklogFilterDate] = useState('');
+  const [backlogStartDate, setBacklogStartDate] = useState('');
+  const [backlogEndDate, setBacklogEndDate] = useState('');
   const [counterUploads, setCounterUploads] = useState<any[]>([]);
   const [adminUploads, setAdminUploads] = useState<any[]>([]);
   const [backlogLoading, setBacklogLoading] = useState(false);
@@ -256,6 +256,17 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         console.error('Error fetching reports:', error);
       } else {
         setReportsData(data || []);
+        setSelectedReportCounterGroup((prev) => {
+          if (!prev) return null;
+          const updatedReports = (data || []).filter((r: any) => r.counter_id === prev.counterId);
+          if (updatedReports.length === 0) return null;
+          const updatedTotal = updatedReports.reduce((sum: number, r: any) => sum + Number(r.amount), 0);
+          return {
+            ...prev,
+            reports: updatedReports,
+            totalAmount: updatedTotal
+          };
+        });
       }
     } catch (err) {
       console.error(err);
@@ -432,6 +443,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
         // Group counter transactions by exact normalized Cheque No
         const counterMap = new Map<string, any[]>();
+        const counterLast10Map = new Map<string, any[]>();
         counterTxsWindow.forEach(t => {
           const keys = String(t.upi_id).split(',');
           keys.forEach(rawKey => {
@@ -439,6 +451,12 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
             if (!counterMap.has(key)) counterMap.set(key, []);
             counterMap.get(key)!.push(t);
+            
+            if (key.length >= 10) {
+              const last10 = key.slice(-10);
+              if (!counterLast10Map.has(last10)) counterLast10Map.set(last10, []);
+              counterLast10Map.get(last10)!.push(t);
+            }
           });
         });
 
@@ -454,8 +472,8 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             if (!adminExactMap.has(key)) adminExactMap.set(key, []);
             adminExactMap.get(key)!.push(t);
             
-            const last10 = key.slice(-10);
-            if (last10 !== key) {
+            if (key.length >= 10) {
+              const last10 = key.slice(-10);
               if (!adminLast10Map.has(last10)) adminLast10Map.set(last10, []);
               adminLast10Map.get(last10)!.push(t);
             }
@@ -523,9 +541,9 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           let matchedAdminList: any[] | undefined = undefined;
 
           for (const cKey of keys) {
-            let aList = adminLast10Map.get(cKey);
-            if (!aList) {
-              aList = adminExactMap.get(cKey);
+            let aList = adminExactMap.get(cKey);
+            if (!aList && cKey.length >= 10) {
+              aList = adminLast10Map.get(cKey.slice(-10));
             }
             if (aList) {
               matchedAdminList = aList;
@@ -580,8 +598,8 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
           for (const aKey of keys) {
             let cList = counterMap.get(aKey);
-            if (!cList && aKey.length > 10) {
-              cList = counterMap.get(aKey.slice(-10));
+            if (!cList && aKey.length >= 10) {
+              cList = counterLast10Map.get(aKey.slice(-10));
             }
             if (cList) {
               matchedCounterList = cList;
@@ -620,7 +638,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
   const handleAddCounterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newCounterName && newUsername && newPassword) {
+    if (newUsername && newPassword) {
       try {
         const { error } = await supabase
           .from('users')
@@ -629,7 +647,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               role: 'counter',
               username: newUsername,
               password: newPassword,
-              counter_name: newCounterName,
+              counter_name: newUsername,
               logins: 0,
             }
           ]);
@@ -638,7 +656,6 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           alert('Error creating counter: ' + error.message);
         } else {
           setIsAddDialogOpen(false);
-          setNewCounterName('');
           setNewUsername('');
           setNewPassword('');
           fetchCounters();
@@ -668,13 +685,13 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     }
   };
 
-  const handleEdit = async (id: number, currentName: string) => {
-    const newName = prompt("Edit name for " + currentName, currentName);
-    if (newName && newName.trim() !== '' && newName !== currentName) {
+  const handleEdit = async (id: number, currentUsername: string) => {
+    const newUsername = prompt("Edit username for " + currentUsername, currentUsername);
+    if (newUsername && newUsername.trim() !== '' && newUsername !== currentUsername) {
       try {
         const { error } = await supabase
           .from('users')
-          .update({ counter_name: newName })
+          .update({ counter_name: newUsername, username: newUsername })
           .eq('id', id);
 
         if (error) {
@@ -830,7 +847,8 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
         if (dateArray.length > 0) {
           setReportsFilterDate(dateArray[0]);
-          setBacklogFilterDate(dateArray[0]);
+          setBacklogStartDate(dateArray[0]);
+          setBacklogEndDate(dateArray[0]);
         }
 
         setAdminStatus({
@@ -864,38 +882,19 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
 
 
-  // Master backlog wipe action
-  const handleWipeAllBacklogData = async () => {
-    if (window.confirm("⚠️ WARNING: This will permanently delete ALL uploaded transaction data (from both Admin and all Counters) and clear all generated discrepancy reports in the entire system. This action CANNOT be undone.\n\nAre you absolutely sure you want to perform this master database wipe?")) {
+  // Wipe Admin Backlog
+  const handleWipeAdminBacklog = async () => {
+    if (window.confirm("⚠️ WARNING: This will permanently delete ALL uploaded Admin transaction data and clear all generated discrepancy reports. This action CANNOT be undone.\n\nAre you sure you want to proceed?")) {
       try {
         setBacklogLoading(true);
+        const { error: reportsError } = await supabase.from('reports').delete().gt('id', 0);
+        if (reportsError) throw new Error(`Failed to clear discrepancy reports: ${reportsError.message}`);
+        const { error: txError } = await supabase.from('transactions').delete().eq('source', 'admin');
+        if (txError) throw new Error(`Failed to clear admin transactions: ${txError.message}`);
         
-        // Delete all reports
-        const { error: reportsError } = await supabase
-          .from('reports')
-          .delete()
-          .gt('id', 0);
-          
-        if (reportsError) {
-          throw new Error(`Failed to clear discrepancy reports: ${reportsError.message}`);
-        }
-
-        // Delete all transactions
-        const { error: txError } = await supabase
-          .from('transactions')
-          .delete()
-          .gt('id', 0);
-
-        if (txError) {
-          throw new Error(`Failed to clear transactions database: ${txError.message}`);
-        }
-
-        alert("🎉 Master wipe completed successfully! Entire transaction backlog and all reports have been fully cleared.");
-        
-        setSelectedBacklogCounter(null);
+        alert("🎉 Admin Backlog wiped successfully!");
         setSelectedDetailBatch(null);
         setSelectedReportCounterGroup(null);
-        
         fetchBacklogHistory();
         fetchReports();
       } catch (err: any) {
@@ -903,6 +902,63 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       } finally {
         setBacklogLoading(false);
       }
+    }
+  };
+
+  // Wipe Counter Backlog
+  const handleWipeCounterBacklog = async () => {
+    if (window.confirm("⚠️ WARNING: This will permanently delete ALL uploaded Counter transaction data and clear all generated discrepancy reports. This action CANNOT be undone.\n\nAre you sure you want to proceed?")) {
+      try {
+        setBacklogLoading(true);
+        const { error: reportsError } = await supabase.from('reports').delete().gt('id', 0);
+        if (reportsError) throw new Error(`Failed to clear discrepancy reports: ${reportsError.message}`);
+        const { error: txError } = await supabase.from('transactions').delete().eq('source', 'counter');
+        if (txError) throw new Error(`Failed to clear counter transactions: ${txError.message}`);
+        
+        alert("🎉 Counter Backlog wiped successfully!");
+        setSelectedBacklogCounter(null);
+        setSelectedDetailBatch(null);
+        setSelectedReportCounterGroup(null);
+        fetchBacklogHistory();
+        fetchReports();
+      } catch (err: any) {
+        alert("Wipe error: " + err.message);
+      } finally {
+        setBacklogLoading(false);
+      }
+    }
+  };
+
+  // Delete a specific batch of transactions for a particular day
+  const handleDeleteBatch = async (date: string, source: 'counter' | 'admin', counter_id: number | null) => {
+    if (!window.confirm(`⚠️ Are you sure you want to delete all ${source} transactions for ${date}? This will also clear discrepancy reports for this date.`)) return;
+    try {
+      setBacklogLoading(true);
+      
+      let txQuery = supabase.from('transactions').delete().eq('date', date).eq('source', source);
+      if (source === 'counter' && counter_id) {
+        txQuery = txQuery.eq('counter_id', counter_id);
+      }
+      
+      const { error: txError } = await txQuery;
+      if (txError) throw new Error(`Failed to delete transactions: ${txError.message}`);
+      
+      const { error: reportsError } = await supabase.from('reports').delete().eq('date', date);
+      if (reportsError) throw new Error(`Failed to delete related reports: ${reportsError.message}`);
+      
+      alert(`🎉 Successfully deleted ${source} data for ${date}.`);
+      
+      // If the currently viewed batch details match, close the modal
+      if (selectedDetailBatch?.date === date && selectedDetailBatch?.source === source && selectedDetailBatch?.counter_id === counter_id) {
+        setSelectedDetailBatch(null);
+      }
+      
+      fetchBacklogHistory();
+      fetchReports();
+    } catch (err: any) {
+      alert("Delete error: " + err.message);
+    } finally {
+      setBacklogLoading(false);
     }
   };
 
@@ -935,6 +991,73 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleMatchReport = async (reportId: number): Promise<boolean> => {
+    try {
+      const report = reportsData.find(r => r.id === reportId);
+      if (!report || !report.date) return false;
+      setReportsLoading(true);
+      await compareTransactionsForDates([report.date]);
+      
+      const { data, error } = await supabase
+        .from('reports')
+        .select('id')
+        .eq('date', report.date)
+        .eq('upi_id', report.upi_id)
+        .eq('amount', report.amount)
+        .eq('type', report.type);
+
+      // It's matched if the exact same discrepancy is no longer generated
+      const isMatched = !error && (!data || data.length === 0);
+      
+      await fetchReports();
+      return isMatched;
+    } catch (err) {
+      console.error(err);
+      return false;
+    } finally {
+      setReportsLoading(false);
+    }
+  };
+
+  const handleMatchAllReports = async (): Promise<{ allMatched: boolean, remainingCount: number }> => {
+    try {
+      if (!selectedReportCounterGroup || !selectedReportCounterGroup.reports) {
+        return { allMatched: false, remainingCount: 0 };
+      }
+      setReportsLoading(true);
+      
+      const uniqueDates = Array.from(new Set(selectedReportCounterGroup.reports.map(r => r.date).filter(Boolean)));
+      if (uniqueDates.length > 0) {
+        await compareTransactionsForDates(uniqueDates as string[]);
+      }
+      
+      // Query remaining for this counter and report type
+      const reportType = currentSlide === 0 ? 'missing_in_admin' : currentSlide === 1 ? 'missing_in_counter' : 'duplicate_upi';
+      let remainingQuery = supabase
+        .from('reports')
+        .select('id')
+        .in('date', uniqueDates as string[])
+        .eq('type', reportType);
+
+      if (selectedReportCounterGroup.counterId !== null) {
+        remainingQuery = remainingQuery.eq('counter_id', selectedReportCounterGroup.counterId);
+      } else {
+        remainingQuery = remainingQuery.is('counter_id', null);
+      }
+
+      const { data, error } = await remainingQuery;
+      const remainingCount = (!error && data) ? data.length : selectedReportCounterGroup.reports.length;
+      
+      await fetchReports();
+      return { allMatched: remainingCount === 0, remainingCount };
+    } catch (err) {
+      console.error(err);
+      return { allMatched: false, remainingCount: selectedReportCounterGroup?.reports?.length || 0 };
+    } finally {
+      setReportsLoading(false);
     }
   };
 
@@ -1194,12 +1317,16 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           <AdminBacklogTab
             counterUploads={counterUploads}
             adminUploads={adminUploads}
-            backlogFilterDate={backlogFilterDate}
-            setBacklogFilterDate={setBacklogFilterDate}
+            backlogStartDate={backlogStartDate}
+            backlogEndDate={backlogEndDate}
+            setBacklogStartDate={setBacklogStartDate}
+            setBacklogEndDate={setBacklogEndDate}
             backlogLoading={backlogLoading}
             backlogSubTab={backlogSubTab}
             setBacklogSubTab={setBacklogSubTab}
-            onWipeBacklog={handleWipeAllBacklogData}
+            onWipeAdminBacklog={handleWipeAdminBacklog}
+            onWipeCounterBacklog={handleWipeCounterBacklog}
+            onDeleteBatch={handleDeleteBatch}
             onOpenBatchDetails={setSelectedDetailBatch}
             selectedBacklogCounter={selectedBacklogCounter}
             setSelectedBacklogCounter={setSelectedBacklogCounter}
@@ -1213,8 +1340,6 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       <AddCounterModal
         isOpen={isAddDialogOpen}
         onClose={() => setIsAddDialogOpen(false)}
-        newCounterName={newCounterName}
-        setNewCounterName={setNewCounterName}
         newUsername={newUsername}
         setNewUsername={setNewUsername}
         newPassword={newPassword}
@@ -1228,6 +1353,8 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         reportsFilterDate={reportsFilterDate}
         onResolveReport={handleResolveReport}
         onEditReport={handleEditReport}
+        onMatchReport={handleMatchReport}
+        onMatchAllReports={handleMatchAllReports}
       />
 
       <BatchDetailsModal

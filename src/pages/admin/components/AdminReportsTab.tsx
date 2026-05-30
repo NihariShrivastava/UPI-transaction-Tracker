@@ -160,13 +160,17 @@ export default function AdminReportsTab({
           </div>
         ) : (
           <div>
-            {currentSlide === 1 && (
+            {(currentSlide === 1 || currentSlide === 2) && (
               <div className="mb-6 p-4 bg-[#151515] border border-[#222222] rounded-2xl flex items-center justify-between shadow-md animate-in fade-in duration-300">
                 <span className="text-xs text-text-secondary font-medium">
                   Total Discrepancies Count:
                 </span>
-                <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
-                  {reportsData.length} Cards Mismatched
+                <span className={`px-3 py-1 rounded-full text-xs font-extrabold border ${
+                  currentSlide === 1 
+                    ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' 
+                    : 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+                }`}>
+                  {reportsData.length} {currentSlide === 1 ? 'Cards Mismatched' : 'Duplicate Entries'}
                 </span>
               </div>
             )}
