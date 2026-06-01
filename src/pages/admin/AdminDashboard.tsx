@@ -14,7 +14,7 @@ import ControlModules from './components/ControlModules';
 import AdminManageCounters from './components/AdminManageCounters';
 import AdminReportsTab from './components/AdminReportsTab';
 import AdminBacklogTab from './components/AdminBacklogTab';
-import { AddCounterModal, ReportGroupDetailsModal, BatchDetailsModal } from './components/AdminModals';
+import { AddCounterModal, ReportGroupDetailsModal, BatchDetailsModal, DuplicateDetailsModal } from './components/AdminModals';
 
 // Fuzzy synonym matching for Excel columns
 const findHeaderKey = (row: any, synonyms: string[]): string | null => {
@@ -86,7 +86,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
   // Slider State
   const [currentSlide, setCurrentSlide] = useState(0);
-  const slides = ['Missing in Admin', 'Missing in Counter', 'Duplicate UPI IDs'];
+  const slides = ['Missing in Admin', 'Missing in Counter', 'Duplicate UPI IDs', 'Overview'];
 
   // Live Excel Upload State (Admin)
   const adminFileInputRef = useRef<HTMLInputElement>(null);
@@ -128,9 +128,16 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   // Selected backlog counter details panel state
   const [selectedBacklogCounter, setSelectedBacklogCounter] = useState<any | null>(null);
 
+  // Selected duplicate report for details modal
+  const [selectedDuplicateReport, setSelectedDuplicateReport] = useState<any | null>(null);
+
   // Global Dashboard Statistics States
   const [totalDiscrepancies, setTotalDiscrepancies] = useState(0);
   const [totalExcelEntries, setTotalExcelEntries] = useState(0);
+
+  // Overview Data State
+  const [overviewData, setOverviewData] = useState<any[]>([]);
+  const [overviewLoading, setOverviewLoading] = useState(false);
 
   // Group reportsData by Counter dynamically for Slide 0
   const groupedReportsByCounter = useMemo(() => {
@@ -225,14 +232,61 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     }
   };
 
+  const fetchOverviewData = async () => {
+    if (activeTab !== 'reports' || currentSlide !== 3) return;
+    
+    setOverviewLoading(true);
+    try {
+      let txQuery = supabase.from('transactions').select('counter_id, source');
+      if (reportsFilterDate) txQuery = txQuery.eq('date', reportsFilterDate);
+      
+      let repQuery = supabase.from('reports').select('counter_id, type');
+      if (reportsFilterDate) repQuery = repQuery.eq('date', reportsFilterDate);
+      
+      const [txRes, repRes] = await Promise.all([txQuery, repQuery]);
+      
+      if (txRes.error || repRes.error) throw new Error('Failed to fetch overview data');
+      
+      const stats = counters.map(counter => {
+        const uploaded = (txRes.data || []).filter(t => t.source === 'counter' && t.counter_id === counter.id).length;
+        const missingInAdmin = (repRes.data || []).filter(r => r.type === 'missing_in_admin' && r.counter_id === counter.id).length;
+        const duplicateUpi = (repRes.data || []).filter(r => r.type === 'duplicate_upi' && r.counter_id === counter.id).length;
+        
+        const discrepancies = missingInAdmin + duplicateUpi;
+        const matched = uploaded - discrepancies;
+        
+        return {
+          counterId: counter.id,
+          counterName: counter.name,
+          uploaded,
+          discrepancies,
+          matched: matched > 0 ? matched : 0
+        };
+      });
+      
+      setOverviewData(stats);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setOverviewLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchCounters();
     fetchLatestDate();
     fetchSystemMetrics();
   }, []);
 
-  // Fetch Reports dynamically depending on current slide and reports filter date
+  useEffect(() => {
+    if (activeTab === 'reports' && currentSlide === 3) {
+      fetchOverviewData();
+    }
+  }, [activeTab, currentSlide, reportsFilterDate, counters]);
+
   const fetchReports = async () => {
+    if (currentSlide === 3) return; // Overview slide doesn't use reportsData
+    
     try {
       setReportsLoading(true);
       const reportType = currentSlide === 0 
@@ -423,6 +477,24 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         const targetTxs = windowTxs.filter(t => t.date === date);
         const targetAdminTxs = targetTxs.filter(t => t.source === 'admin');
         const targetCounterTxs = targetTxs.filter(t => t.source === 'counter');
+
+        // Fetch existing reports to preserve UI state (is_edited, is_failed_match)
+        const { data: existingReports } = await supabase
+          .from('reports')
+          .select('upi_id, details')
+          .eq('date', date);
+
+        const preservedState: Record<string, { is_edited?: boolean, is_failed_match?: boolean }> = {};
+        if (existingReports) {
+          existingReports.forEach(r => {
+            if (r.details?.is_edited || r.details?.is_failed_match) {
+              preservedState[r.upi_id] = {
+                is_edited: r.details.is_edited,
+                is_failed_match: r.details.is_failed_match
+              };
+            }
+          });
+        }
 
         // Clear pre-existing reports to prevent drift/overlap
         await supabase
@@ -623,8 +695,21 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           }
         });
 
-        // Remove source_id before inserting into database
-        const finalReports = reportsToInsert.map(({ source_id, ...report }) => report);
+        // Remove source_id and apply preserved state before inserting into database
+        const finalReports = reportsToInsert.map(({ source_id, ...report }) => {
+          const pState = preservedState[report.upi_id];
+          if (pState) {
+            return {
+              ...report,
+              details: {
+                ...report.details,
+                ...(pState.is_edited && { is_edited: true }),
+                ...(pState.is_failed_match && { is_failed_match: true })
+              }
+            };
+          }
+          return report;
+        });
 
         if (finalReports.length > 0) {
           await supabase.from('reports').insert(finalReports);
@@ -1012,6 +1097,17 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       // It's matched if the exact same discrepancy is no longer generated
       const isMatched = !error && (!data || data.length === 0);
       
+      if (!isMatched && data && data.length > 0) {
+        // The discrepancy still exists. Update the recreated report with is_failed_match: true.
+        const recreatedReportId = data[0].id;
+        const { data: fetchReq } = await supabase.from('reports').select('details').eq('id', recreatedReportId).single();
+        if (fetchReq) {
+          await supabase.from('reports').update({
+            details: { ...fetchReq.details, is_failed_match: true }
+          }).eq('id', recreatedReportId);
+        }
+      }
+
       await fetchReports();
       return isMatched;
     } catch (err) {
@@ -1124,6 +1220,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       // 5. Update report values inside the reports table so it correctly shows updated details
       const updatedDetails = {
         ...originalReport.details,
+        is_edited: true,
         message: originalReport.type === 'missing_in_admin'
           ? `Cheque Number '${newUpiId}' is available in Counter but missing in Admin sheet.`
           : originalReport.type === 'missing_in_counter'
@@ -1310,6 +1407,11 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             onResolveReport={handleResolveReport}
             onOpenGroupDetails={setSelectedReportCounterGroup}
             groupedReportsByCounter={groupedReportsByCounter}
+            onEditReport={handleEditReport}
+            onMatchReport={handleMatchReport}
+            onOpenDuplicateDetails={setSelectedDuplicateReport}
+            overviewData={overviewData}
+            overviewLoading={overviewLoading}
           />
         )}
 
@@ -1364,6 +1466,11 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         batchDetailsData={batchDetailsData}
         batchDetailsSearch={batchDetailsSearch}
         setBatchDetailsSearch={setBatchDetailsSearch}
+      />
+
+      <DuplicateDetailsModal
+        report={selectedDuplicateReport}
+        onClose={() => setSelectedDuplicateReport(null)}
       />
 
     </div>

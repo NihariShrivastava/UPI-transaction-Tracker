@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from '../../../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Sparkles, Loader2, Search, AlertTriangle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../../components/ui/Card';
@@ -108,7 +109,6 @@ export function ReportGroupDetailsModal({
   const [isSaving, setIsSaving] = useState(false);
   const [isMatching, setIsMatching] = useState<{ [key: number]: boolean }>({});
   const [isMatchingAll, setIsMatchingAll] = useState(false);
-  const [editedReportIds, setEditedReportIds] = useState<number[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const uniqueUpiIds = group && group.counterName
@@ -220,16 +220,17 @@ export function ReportGroupDetailsModal({
                   <TableBody>
                     {[...filteredReports]
                       .sort((a, b) => {
-                        const aEdited = editedReportIds.includes(a.id);
-                        const bEdited = editedReportIds.includes(b.id);
+                        const aEdited = a.details?.is_edited === true;
+                        const bEdited = b.details?.is_edited === true;
                         if (aEdited && !bEdited) return -1;
                         if (!aEdited && bEdited) return 1;
                         return 0;
                       })
                       .map((report: any, idx: number) => {
                       const isEditing = editingReportId === report.id;
+                      const isEditedAndFailed = report.details?.is_edited === true && report.details?.is_failed_match === true;
                       return (
-                        <TableRow key={report.id} className="hover:bg-[#222222]/20 border-b border-[#222222]/50 transition-colors animate-in slide-in-from-left duration-200">
+                        <TableRow key={report.id} className={`border-b border-[#222222]/50 transition-colors animate-in slide-in-from-left duration-200 ${isEditedAndFailed ? 'bg-purple-900/30 hover:bg-purple-900/40' : 'hover:bg-[#222222]/20'}`}>
                           <TableCell className="font-mono text-text-secondary text-xs">{idx + 1}</TableCell>
                           <TableCell className="font-mono text-white font-semibold">
                             {isEditing ? (
@@ -259,7 +260,7 @@ export function ReportGroupDetailsModal({
                               `₹${Number(report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                             )}
                           </TableCell>
-                          <TableCell className="text-xs text-text-secondary leading-relaxed max-w-[280px]">
+                          <TableCell className="text-xs text-purple-400 font-medium leading-relaxed max-w-[280px]">
                             <div className="flex flex-col gap-1.5 items-start w-full">
                               <span className="truncate w-full block" title={report.details?.message}>
                                 {report.details?.message || `Missing in Admin sheet.`}
@@ -286,7 +287,6 @@ export function ReportGroupDetailsModal({
                                     setIsSaving(true);
                                     try {
                                       await onEditReport(report.id, editUpiId, Number(editAmount));
-                                      setEditedReportIds(prev => [report.id, ...prev.filter(id => id !== report.id)]);
                                       setEditingReportId(null);
                                     } catch (e) {
                                       console.error(e);
@@ -507,6 +507,141 @@ export function BatchDetailsModal({
           </motion.div>
         </div>
       )}
+    </AnimatePresence>
+  );
+}
+
+interface DuplicateDetailsModalProps {
+  report: any;
+  onClose: () => void;
+}
+
+export function DuplicateDetailsModal({ report, onClose }: DuplicateDetailsModalProps) {
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const fetchTransactions = async () => {
+      if (!report) return;
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('transactions')
+          .select('id, upi_id, amount, date, source, counter_id, users(counter_name)')
+          .eq('date', report.date)
+          .eq('upi_id', report.upi_id)
+          .order('source', { ascending: false });
+        
+        if (!error && data) {
+          setTransactions(data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch duplicate transactions", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchTransactions();
+  }, [report]);
+
+  if (!report) return null;
+
+  return (
+    <AnimatePresence>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+          className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+        />
+        
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 20 }}
+          className="relative w-full max-w-4xl bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        >
+          <div className="flex items-center justify-between p-6 border-b border-[#222222]/50 bg-black/40">
+            <div>
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-orange-400" />
+                Duplicate Entries Found
+              </h2>
+              <p className="text-sm text-text-secondary mt-1 font-mono">
+                UTR / Cheque No: <span className="text-purple-400 font-bold">{report.upi_id}</span>
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-2 text-text-secondary hover:text-white hover:bg-[#222222] rounded-xl transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="p-6 overflow-y-auto">
+            {loading ? (
+              <div className="flex justify-center items-center py-20">
+                <Loader2 className="w-10 h-10 text-purple-500 animate-spin" />
+              </div>
+            ) : transactions.length === 0 ? (
+              <div className="text-center py-20 text-text-secondary font-mono">
+                No duplicate transactions found in the database.
+              </div>
+            ) : (
+              <div className="rounded-xl border border-[#222222]/50 overflow-hidden bg-black/20">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent border-b border-[#222222]/50">
+                      <TableHead>Source</TableHead>
+                      <TableHead>Counter Name</TableHead>
+                      <TableHead className="text-right">Amount (₹)</TableHead>
+                      <TableHead className="text-right">Transaction Date</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {transactions.map((tx) => (
+                      <TableRow key={tx.id} className="border-b border-[#222222]/50 hover:bg-[#222222]/30 transition-colors">
+                        <TableCell>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase ${
+                            tx.source === 'admin' 
+                              ? 'bg-purple-500/10 border border-purple-500/20 text-purple-400'
+                              : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                          }`}>
+                            {tx.source}
+                          </span>
+                        </TableCell>
+                        <TableCell className="font-mono text-white text-sm font-semibold">
+                          {tx.source === 'admin' ? 'Admin Sheet' : tx.users?.counter_name || `Counter ${tx.counter_id}`}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-purple-400 font-bold">
+                          ₹{Number(tx.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-text-secondary text-sm">
+                          {tx.date ? new Date(tx.date).toLocaleDateString('en-GB') : 'N/A'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+          
+          <div className="p-4 border-t border-[#222222]/50 bg-black/40 flex justify-end">
+            <Button 
+              variant="ghost" 
+              onClick={onClose} 
+              className="bg-[#222222] hover:bg-[#333333] text-white rounded-xl shadow-lg font-semibold h-10 px-6"
+            >
+              Close
+            </Button>
+          </div>
+        </motion.div>
+      </div>
     </AnimatePresence>
   );
 }

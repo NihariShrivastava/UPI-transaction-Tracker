@@ -2,6 +2,7 @@ import { useRef, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight, AlertTriangle, Calendar, X, Users } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
+import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '../../../components/ui/Table';
 
 interface AdminReportsTabProps {
   reportsData: any[];
@@ -15,6 +16,11 @@ interface AdminReportsTabProps {
   onResolveReport: (id: number) => void;
   onOpenGroupDetails: (group: any) => void;
   groupedReportsByCounter: any[];
+  onEditReport?: (id: number, newUpiId: string, newAmount: number) => Promise<void>;
+  onMatchReport?: (id: number) => Promise<boolean>;
+  overviewData?: any[];
+  overviewLoading?: boolean;
+  onOpenDuplicateDetails?: (report: any) => void;
 }
 
 export default function AdminReportsTab({
@@ -28,10 +34,21 @@ export default function AdminReportsTab({
   prevSlide,
   onResolveReport,
   onOpenGroupDetails,
-  groupedReportsByCounter
+  groupedReportsByCounter,
+  onEditReport,
+  onMatchReport,
+  overviewData,
+  overviewLoading,
+  onOpenDuplicateDetails
 }: AdminReportsTabProps) {
   const reportsDateInputRef = useRef<HTMLInputElement>(null);
   const [tempFilterDate, setTempFilterDate] = useState(reportsFilterDate);
+  const [editingReportId, setEditingReportId] = useState<number | null>(null);
+  const [editUpiId, setEditUpiId] = useState('');
+  const [editAmount, setEditAmount] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [isMatching, setIsMatching] = useState<{ [key: number]: boolean }>({});
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setTempFilterDate(reportsFilterDate);
@@ -147,12 +164,29 @@ export default function AdminReportsTab({
           </div>
         </div>
 
-        {reportsLoading ? (
+        {/* Error Popup */}
+        {errorMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-4 flex items-center justify-between bg-red-500/10 border border-red-500/50 text-red-400 px-4 py-3 rounded-xl shadow-lg"
+          >
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+            <button onClick={() => setErrorMessage(null)} className="hover:text-white p-1">
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+
+        {reportsLoading && currentSlide !== 3 ? (
           <div className="flex flex-col items-center justify-center py-20 text-text-secondary gap-3">
             <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
             <span>Loading live reports from Supabase...</span>
           </div>
-        ) : reportsData.length === 0 ? (
+        ) : currentSlide !== 3 && reportsData.length === 0 ? (
           <div className="text-center py-16 text-emerald-400 font-semibold bg-emerald-500/5 rounded-2xl border border-emerald-500/10 shadow-lg">
             {reportsFilterDate 
               ? "Perfect match! No discrepancies found on this date."
@@ -217,16 +251,74 @@ export default function AdminReportsTab({
                   </motion.div>
                 ))}
               </div>
+            ) : currentSlide === 3 ? (
+              /* Slide 3: Overview */
+              <div className="bg-[#151515] border border-[#222222] rounded-2xl p-6">
+                {overviewLoading ? (
+                  <div className="flex justify-center py-10">
+                    <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : overviewData?.length === 0 ? (
+                  <div className="text-center py-10 text-text-secondary">No overview data available.</div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent border-b border-[#222222]">
+                        <TableHead>Counter Name</TableHead>
+                        <TableHead className="text-right">Total Uploaded</TableHead>
+                        <TableHead className="text-right">Discrepancies</TableHead>
+                        <TableHead className="text-right">Matched Cases</TableHead>
+                        <TableHead className="text-right">Match Rate</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {overviewData?.map(stat => (
+                        <TableRow key={stat.counterId} className="border-b border-[#222222]/50 hover:bg-[#222222]/20">
+                          <TableCell className="font-bold text-white">{stat.counterName}</TableCell>
+                          <TableCell className="text-right text-text-secondary font-mono">{stat.uploaded}</TableCell>
+                          <TableCell className="text-right text-orange-400 font-mono font-semibold">{stat.discrepancies}</TableCell>
+                          <TableCell className="text-right text-emerald-400 font-mono font-semibold">{stat.matched}</TableCell>
+                          <TableCell className="text-right text-purple-400 font-mono font-semibold">
+                            {stat.uploaded > 0 ? ((stat.matched / stat.uploaded) * 100).toFixed(1) + '%' : '-'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
             ) : (
               /* Slide 1 & Slide 2: Render premium individual cards */
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
-                {reportsData.map((report) => (
+                {[...reportsData]
+                  .sort((a, b) => {
+                    const aEdited = a.details?.is_edited === true;
+                    const bEdited = b.details?.is_edited === true;
+                    if (aEdited && !bEdited) return -1;
+                    if (!aEdited && bEdited) return 1;
+                    return 0;
+                  })
+                  .map((report) => {
+                  const isEditing = editingReportId === report.id;
+                  const isEditedAndFailed = report.details?.is_edited === true && report.details?.is_failed_match === true;
+                  return (
                   <motion.div
                     key={report.id}
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
-                    whileHover={{ y: -4 }}
-                    className="group relative bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] hover:border-purple-500/30 p-6 rounded-2xl transition-all duration-300 shadow-xl overflow-hidden flex flex-col justify-between"
+                    whileHover={!isEditing ? { y: -4 } : {}}
+                    onClick={() => {
+                      if (!isEditing && report.type === 'duplicate_upi' && onOpenDuplicateDetails) {
+                        onOpenDuplicateDetails(report);
+                      }
+                    }}
+                    className={`group relative border ${
+                      isEditedAndFailed 
+                        ? 'bg-purple-900/30 border-purple-500/50 hover:bg-purple-900/40' 
+                        : 'bg-gradient-to-br from-[#161616] to-[#0d0d0d] border-[#222222] hover:border-purple-500/30'
+                    } p-6 rounded-2xl transition-all duration-300 shadow-xl overflow-hidden flex flex-col justify-between ${
+                      !isEditing && report.type === 'duplicate_upi' ? 'cursor-pointer' : ''
+                    }`}
                   >
                     <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
 
@@ -244,33 +336,133 @@ export default function AdminReportsTab({
                         </span>
                       </div>
 
-                      <h4 className="text-sm font-bold text-white font-mono truncate" title={report.upi_id}>
-                        {report.upi_id}
-                      </h4>
-                      <p className="text-xs text-text-secondary mt-2 leading-relaxed">
-                        {report.details?.message || (
-                          report.type === 'missing_in_counter'
-                            ? 'Available in Admin Excel sheet but missing from all Counter sheets.'
-                            : 'Multiple transaction instances found on this date.'
-                        )}
-                      </p>
+                      {isEditing ? (
+                        <div className="space-y-3 mt-2 relative z-10">
+                          <div>
+                            <label className="text-[10px] uppercase tracking-wider text-text-secondary mb-1 block">Cheque Number / UTR</label>
+                            <input
+                              type="text"
+                              value={editUpiId}
+                              onChange={e => setEditUpiId(e.target.value)}
+                              className="w-full bg-[#000000] border border-purple-500/50 rounded-xl h-9 px-3 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] uppercase tracking-wider text-text-secondary mb-1 block">Amount (₹)</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={editAmount}
+                              onChange={e => setEditAmount(e.target.value)}
+                              className="w-full bg-[#000000] border border-purple-500/50 rounded-xl h-9 px-3 text-xs text-purple-400 font-bold focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <h4 className="text-sm font-bold text-white font-mono truncate" title={report.upi_id}>
+                            {report.upi_id}
+                          </h4>
+                          <p className="text-xs text-text-secondary mt-2 leading-relaxed">
+                            {report.details?.message || (
+                              report.type === 'missing_in_counter'
+                                ? 'Available in Admin Excel sheet but missing from all Counter sheets.'
+                                : 'Multiple transaction instances found on this date.'
+                            )}
+                          </p>
+                        </>
+                      )}
                     </div>
 
-                    <div className="mt-6 pt-4 border-t border-[#222222]/80 flex items-center justify-between">
+                    <div className="mt-6 pt-4 border-t border-[#222222]/80 flex items-center justify-between relative z-10">
                       <span className="text-sm font-mono text-purple-400 font-bold">
-                        ₹{Number(report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        {!isEditing && `₹${Number(report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
                       </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onResolveReport(report.id)}
-                        className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 px-3 font-semibold rounded-lg text-xs h-8"
-                      >
-                        Resolve
-                      </Button>
+                      
+                      {isEditing ? (
+                        <div className="flex items-center gap-2">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            disabled={isSaving}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingReportId(null);
+                            }}
+                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10 font-semibold rounded-lg text-[10px] h-7 px-3"
+                          >
+                            Cancel
+                          </Button>
+                          <Button 
+                            variant="primary" 
+                            size="sm" 
+                            disabled={isSaving}
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              if (!editUpiId.trim() || !editAmount.trim()) {
+                                setErrorMessage("Cheque/UTR and Amount cannot be empty.");
+                                return;
+                              }
+                              setIsSaving(true);
+                              try {
+                                if (onEditReport) {
+                                  await onEditReport(report.id, editUpiId, Number(editAmount));
+                                }
+                                setEditingReportId(null);
+                              } catch (e) {
+                                console.error(e);
+                              } finally {
+                                setIsSaving(false);
+                              }
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-[10px] h-7 px-3"
+                          >
+                            {isSaving ? "Saving..." : "Save"}
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          {onEditReport && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingReportId(report.id);
+                                setEditUpiId(report.upi_id);
+                                setEditAmount(String(report.amount));
+                              }}
+                              className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-2 font-semibold rounded-lg text-[10px] h-7"
+                            >
+                              Edit
+                            </Button>
+                          )}
+                          {onMatchReport && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={isMatching[report.id]}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                setIsMatching(prev => ({ ...prev, [report.id]: true }));
+                                const isMatched = await onMatchReport(report.id);
+                                setIsMatching(prev => ({ ...prev, [report.id]: false }));
+                                if (!isMatched) {
+                                  setErrorMessage("This entry did not match any uploaded Admin Excel records.");
+                                  setTimeout(() => setErrorMessage(null), 5000);
+                                }
+                              }}
+                              className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 px-2 font-semibold rounded-lg text-[10px] h-7"
+                            >
+                              {isMatching[report.id] ? "Matching..." : "Match"}
+                            </Button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </motion.div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
