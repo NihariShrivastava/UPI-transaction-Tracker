@@ -1404,7 +1404,6 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             slides={slides}
             nextSlide={nextSlide}
             prevSlide={prevSlide}
-            onResolveReport={handleResolveReport}
             onOpenGroupDetails={setSelectedReportCounterGroup}
             groupedReportsByCounter={groupedReportsByCounter}
             onEditReport={handleEditReport}

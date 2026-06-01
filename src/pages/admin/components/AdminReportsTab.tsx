@@ -13,7 +13,6 @@ interface AdminReportsTabProps {
   slides: string[];
   nextSlide: () => void;
   prevSlide: () => void;
-  onResolveReport: (id: number) => void;
   onOpenGroupDetails: (group: any) => void;
   groupedReportsByCounter: any[];
   onEditReport?: (id: number, newUpiId: string, newAmount: number) => Promise<void>;
@@ -32,7 +31,6 @@ export default function AdminReportsTab({
   slides,
   nextSlide,
   prevSlide,
-  onResolveReport,
   onOpenGroupDetails,
   groupedReportsByCounter,
   onEditReport,
