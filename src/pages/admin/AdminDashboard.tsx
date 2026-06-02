@@ -821,7 +821,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         const phonepeSynonyms = ['phonepereferenceid', 'phonepeid', 'phonepe', 'phonepereference'];
         const utrSynonyms = ['transactionutr', 'utr', 'transactionid', 'upiid', 'chequeno', 'chequenumber', 'cheque_number', 'referenceno', 'refno'];
         const dateSynonyms = ['transactiondate', 'transaction_date', 'date', 'chequedate', 'cheque_date', 'uploaddate'];
-        const amountSynonyms = ['upiamount', 'amount', 'receipt', 'receiptamount', 'receipt_amount', 'value'];
+        const amountSynonyms = ['totaltransactionamount', 'upiamount', 'amount', 'receipt', 'receiptamount', 'receipt_amount', 'value'];
 
         const firstRow = rows[0];
         const phonepeKey = findHeaderKey(firstRow, phonepeSynonyms);
