@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, AlertTriangle, Calendar, X, Users } from 'lucide-react';
+import { ChevronLeft, ChevronRight, AlertTriangle, Calendar, X, Users, Download } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { Button } from '../../../components/ui/Button';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '../../../components/ui/Table';
 
@@ -59,6 +60,72 @@ export default function AdminReportsTab({
   const handleClearDate = () => {
     setTempFilterDate('');
     setReportsFilterDate('');
+  };
+
+  const handleDownloadExcel = () => {
+    let exportData: any[] = [];
+    let filename = 'Report.xlsx';
+
+    if (currentSlide === 0) {
+      filename = 'Missing_in_Admin_Report.xlsx';
+      groupedReportsByCounter.forEach((group: any) => {
+        group.reports.forEach((r: any) => {
+          exportData.push({
+            'Counter Name': group.counterName,
+            'UPI ID / Cheque No': r.upi_id,
+            'Amount': r.amount,
+            'Date': r.date || reportsFilterDate || new Date().toISOString().split('T')[0],
+            'Type': 'Missing in Admin',
+            'Details': r.details?.message || ''
+          });
+        });
+      });
+    } else if (currentSlide === 1) {
+      filename = 'Missing_in_Counter_Report.xlsx';
+      reportsData.forEach(r => {
+        exportData.push({
+          'UPI ID / UTR': r.upi_id,
+          'Amount': r.amount,
+          'Date': r.date || reportsFilterDate || new Date().toISOString().split('T')[0],
+          'Type': 'Missing in Counter',
+          'Details': r.details?.message || ''
+        });
+      });
+    } else if (currentSlide === 2) {
+      filename = 'Duplicate_Entries_Report.xlsx';
+      reportsData.forEach(r => {
+        exportData.push({
+          'Counter Name': r.details?.counter_name || r.users?.counter_name || 'Admin',
+          'UPI ID / Ref': r.upi_id,
+          'Amount': r.amount,
+          'Date': r.date || reportsFilterDate || new Date().toISOString().split('T')[0],
+          'Type': 'Duplicate',
+          'Details': r.details?.message || ''
+        });
+      });
+    } else if (currentSlide === 3) {
+      filename = 'Overview_Report.xlsx';
+      (overviewData || []).forEach(stat => {
+        exportData.push({
+          'Counter Name': stat.counterName,
+          'Total Uploaded': stat.uploaded,
+          'Discrepancies': stat.discrepancies,
+          'Matched Cases': stat.matched,
+          'Match Rate': stat.uploaded > 0 ? ((stat.matched / stat.uploaded) * 100).toFixed(1) + '%' : '-'
+        });
+      });
+    }
+
+    if (exportData.length === 0) {
+      setErrorMessage("No data available to download for this report.");
+      setTimeout(() => setErrorMessage(null), 3000);
+      return;
+    }
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Report');
+    XLSX.writeFile(workbook, filename);
   };
 
   return (
@@ -159,6 +226,14 @@ export default function AdminReportsTab({
                 Clear
               </Button>
             )}
+
+            <Button
+              onClick={handleDownloadExcel}
+              className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 font-bold text-xs px-4 h-[34px] rounded-xl transition-all flex items-center gap-2 ml-2"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download Excel
+            </Button>
           </div>
         </div>
 
