@@ -1,6 +1,6 @@
-import { useRef, useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, AlertTriangle, Calendar, X, Users, Download } from 'lucide-react';
+import { useRef, useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ChevronLeft, ChevronRight, AlertTriangle, Calendar, X, Users, Download, ChevronDown, ChevronUp, Search } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Button } from '../../../components/ui/Button';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '../../../components/ui/Table';
@@ -17,10 +17,14 @@ interface AdminReportsTabProps {
   onOpenGroupDetails: (group: any) => void;
   groupedReportsByCounter: any[];
   onEditReport?: (id: number, newUpiId: string, newAmount: number) => Promise<void>;
+  onAddRemark?: (id: number, remark: string) => Promise<void>;
   onMatchReport?: (id: number) => Promise<boolean>;
-  overviewData?: any[];
-  overviewLoading?: boolean;
   onOpenDuplicateDetails?: (report: any) => void;
+  uploadMetrics?: {
+    byCounter: Record<string, number>;
+    byStore: Record<string, number>;
+    byAdmin: number;
+  };
 }
 
 export default function AdminReportsTab({
@@ -35,23 +39,66 @@ export default function AdminReportsTab({
   onOpenGroupDetails,
   groupedReportsByCounter,
   onEditReport,
+  onAddRemark,
   onMatchReport,
-  overviewData,
-  overviewLoading,
-  onOpenDuplicateDetails
+  onOpenDuplicateDetails,
+  uploadMetrics
 }: AdminReportsTabProps) {
   const reportsDateInputRef = useRef<HTMLInputElement>(null);
   const [tempFilterDate, setTempFilterDate] = useState(reportsFilterDate);
   const [editingReportId, setEditingReportId] = useState<number | null>(null);
+  const [selectedCounterForStores, setSelectedCounterForStores] = useState<any | null>(null);
+  const [selectedCounterFilter, setSelectedCounterFilter] = useState('');
+  const [selectedStoreFilter, setSelectedStoreFilter] = useState('');
+  const [isOverviewOpen, setIsOverviewOpen] = useState(false);
+  const [remarkingReportId, setRemarkingReportId] = useState<number | null>(null);
   const [editUpiId, setEditUpiId] = useState('');
   const [editAmount, setEditAmount] = useState('');
+  const [editRemark, setEditRemark] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isMatching, setIsMatching] = useState<{ [key: number]: boolean }>({});
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [globalSearch, setGlobalSearch] = useState('');
+
+  const filteredGroupedReportsByCounter = useMemo(() => {
+    if (!globalSearch.trim()) return groupedReportsByCounter;
+    const lower = globalSearch.toLowerCase();
+    return groupedReportsByCounter.map(g => {
+      const filteredReports = g.reports.filter((r: any) => 
+        String(r.upi_id || '').toLowerCase().includes(lower) || 
+        String(r.amount || '').includes(lower)
+      );
+      return { ...g, reports: filteredReports };
+    }).filter(g => g.reports.length > 0);
+  }, [groupedReportsByCounter, globalSearch]);
+
+  const filteredReportsData = useMemo(() => {
+    if (!globalSearch.trim()) return reportsData;
+    const lower = globalSearch.toLowerCase();
+    return reportsData.filter((r: any) => 
+      String(r.upi_id || '').toLowerCase().includes(lower) || 
+      String(r.amount || '').includes(lower) ||
+      String(r.details?.admin_store_name || '').toLowerCase().includes(lower) ||
+      String(r.details?.admin_store_id || '').toLowerCase().includes(lower) ||
+      String(r.details?.counter_name || '').toLowerCase().includes(lower) ||
+      String(r.users?.counter_name || '').toLowerCase().includes(lower) ||
+      String(r.users?.username || '').toLowerCase().includes(lower)
+    );
+  }, [reportsData, globalSearch]);
 
   useEffect(() => {
     setTempFilterDate(reportsFilterDate);
   }, [reportsFilterDate]);
+
+  const handleNextSlide = () => {
+    nextSlide();
+    setSelectedCounterForStores(null);
+  };
+
+  const handlePrevSlide = () => {
+    prevSlide();
+    setSelectedCounterForStores(null);
+  };
 
   const handleApplyDate = () => {
     setReportsFilterDate(tempFilterDate);
@@ -60,6 +107,10 @@ export default function AdminReportsTab({
   const handleClearDate = () => {
     setTempFilterDate('');
     setReportsFilterDate('');
+    setSelectedCounterForStores(null);
+    setSelectedCounterFilter('');
+    setSelectedStoreFilter('');
+    setGlobalSearch('');
   };
 
   const handleDownloadExcel = () => {
@@ -103,17 +154,6 @@ export default function AdminReportsTab({
           'Details': r.details?.message || ''
         });
       });
-    } else if (currentSlide === 3) {
-      filename = 'Overview_Report.xlsx';
-      (overviewData || []).forEach(stat => {
-        exportData.push({
-          'Counter Name': stat.counterName,
-          'Total Uploaded': stat.uploaded,
-          'Discrepancies': stat.discrepancies,
-          'Matched Cases': stat.matched,
-          'Match Rate': stat.uploaded > 0 ? ((stat.matched / stat.uploaded) * 100).toFixed(1) + '%' : '-'
-        });
-      });
     }
 
     if (exportData.length === 0) {
@@ -128,6 +168,95 @@ export default function AdminReportsTab({
     XLSX.writeFile(workbook, filename);
   };
 
+  const groupedMissingInCounter = useMemo(() => {
+    if (currentSlide !== 1) return [];
+    
+    const groups: { [key: string]: { storeName: string; storeId: string; reports: any[]; totalAmount: number } } = {};
+    
+    filteredReportsData.forEach(r => {
+      const sName = r.details?.admin_store_name || '';
+      const sId = r.details?.admin_store_id || '';
+      
+      let storeNameDisplay = 'Unassigned Mismatches';
+      let storeIdDisplay = 'Pending Upload';
+      let key = 'unassigned';
+      
+      if (sName || sId) {
+        storeNameDisplay = sName || 'Unknown Store';
+        storeIdDisplay = sId || 'Unknown ID';
+        key = `${storeNameDisplay}_${storeIdDisplay}`;
+      }
+      
+      if (!groups[key]) {
+        groups[key] = {
+          storeName: storeNameDisplay,
+          storeId: storeIdDisplay,
+          reports: [],
+          totalAmount: 0
+        };
+      }
+      
+      groups[key].reports.push(r);
+      groups[key].totalAmount += Number(r.amount);
+    });
+    
+    return Object.values(groups);
+  }, [reportsData, currentSlide]);
+
+  const uniqueCountersForFilter = useMemo(() => {
+    return Array.from(new Set(groupedReportsByCounter.map(g => g.username))).filter(Boolean);
+  }, [groupedReportsByCounter]);
+
+  const uniqueStoresForFilter = useMemo(() => {
+    return Array.from(new Set(groupedMissingInCounter.map((g: any) => g.storeName))).filter(Boolean);
+  }, [groupedMissingInCounter]);
+
+  const overviewSlide0 = useMemo(() => {
+    if (currentSlide !== 0) return [];
+    return groupedReportsByCounter.map(g => ({
+      name: g.username,
+      uploaded: uploadMetrics?.byCounter[g.username] || 0,
+      discrepancies: g.reports.length,
+      matched: g.reports.filter((r: any) => r.details?.is_edited && !r.details?.is_failed_match).length
+    }));
+  }, [groupedReportsByCounter, currentSlide, uploadMetrics]);
+
+  const overviewSlide1 = useMemo(() => {
+    if (currentSlide !== 1) return [];
+    return groupedMissingInCounter.map((g: any) => ({
+      name: g.storeName === 'Unassigned Mismatches' ? 'Unassigned Mismatches' : `${g.storeName} - ${g.storeId}`,
+      uploaded: uploadMetrics?.byStore[g.storeName === 'Unassigned Mismatches' ? 'Unassigned Mismatches' : `${g.storeName} - ${g.storeId}`] || 0,
+      discrepancies: g.reports.length,
+      matched: g.reports.filter((r: any) => r.details?.is_edited && !r.details?.is_failed_match).length
+    }));
+  }, [groupedMissingInCounter, currentSlide, uploadMetrics]);
+
+  const overviewSlide2 = useMemo(() => {
+    if (currentSlide !== 2) return [];
+    const groups: { [key: string]: { name: string, uploaded: number, discrepancies: number, matched: number } } = {};
+    
+    filteredReportsData.forEach(r => {
+      let name = 'Counter ' + (r.counter_id || 'Unknown');
+      let uploaded = 0;
+      if (r.details?.source === 'admin') {
+        name = 'Admin Sheet';
+        uploaded = uploadMetrics?.byAdmin || 0;
+      } else if (r.details?.source === 'counter') {
+         name = r.users?.counter_name || `Counter ${r.counter_id}`;
+         uploaded = uploadMetrics?.byCounter[r.users?.username] || 0; // fallback logic
+      }
+      
+      if (!groups[name]) groups[name] = { name, uploaded, discrepancies: 0, matched: 0 };
+      groups[name].discrepancies += 1;
+      if (r.details?.is_edited && !r.details?.is_failed_match) {
+        groups[name].matched += 1;
+      }
+    });
+    return Object.values(groups);
+  }, [reportsData, currentSlide, uploadMetrics]);
+
+  const currentOverviewData = currentSlide === 0 ? overviewSlide0 : currentSlide === 1 ? overviewSlide1 : overviewSlide2;
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
       {/* Slider Navigation Header */}
@@ -135,7 +264,7 @@ export default function AdminReportsTab({
         <Button 
           variant="secondary" 
           size="sm" 
-          onClick={prevSlide} 
+          onClick={handlePrevSlide} 
           className="w-10 h-10 p-0 rounded-xl bg-[#222222] border-[#333333] hover:bg-[#333333]"
         >
           <ChevronLeft className="w-5 h-5 text-purple-400" />
@@ -158,7 +287,7 @@ export default function AdminReportsTab({
         <Button 
           variant="secondary" 
           size="sm" 
-          onClick={nextSlide} 
+          onClick={handleNextSlide} 
           className="w-10 h-10 p-0 rounded-xl bg-[#222222] border-[#333333] hover:bg-[#333333]"
         >
           <ChevronRight className="w-5 h-5 text-purple-400" />
@@ -176,7 +305,24 @@ export default function AdminReportsTab({
             Viewing verified live discrepancy reports.
           </div>
           
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+          <div className="flex flex-wrap items-center gap-2 mt-4 sm:mt-0">
+            
+            <div className="flex items-center gap-2 bg-[#000000] border border-[#222222] rounded-xl px-3 py-1.5 focus-within:border-purple-500/50 transition-colors w-full sm:w-64">
+              <Search className="w-4 h-4 text-purple-400 shrink-0" />
+              <input 
+                type="text" 
+                value={globalSearch}
+                onChange={e => setGlobalSearch(e.target.value)}
+                placeholder="Search UTR, Amount, Store..."
+                className="bg-transparent text-xs text-white focus:outline-none w-full"
+              />
+              {globalSearch && (
+                <button onClick={() => setGlobalSearch('')} className="text-text-secondary hover:text-white shrink-0">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            
             <div 
               onClick={() => {
                 try {
@@ -217,7 +363,7 @@ export default function AdminReportsTab({
               Apply
             </Button>
 
-            {reportsFilterDate && (
+            {(reportsFilterDate || selectedCounterFilter || selectedStoreFilter) && (
               <Button
                 onClick={handleClearDate}
                 variant="ghost"
@@ -226,6 +372,40 @@ export default function AdminReportsTab({
                 Clear
               </Button>
             )}
+
+            {currentSlide === 0 && uniqueCountersForFilter.length > 0 && (
+              <select
+                value={selectedCounterFilter}
+                onChange={e => setSelectedCounterFilter(e.target.value)}
+                className="bg-[#000000] border border-[#222222] hover:border-purple-500/50 focus:border-purple-500 rounded-xl h-[34px] px-3 text-xs text-white focus:outline-none transition-all cursor-pointer ml-2"
+              >
+                <option value="">All Counters</option>
+                {uniqueCountersForFilter.map((c: any) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            )}
+
+            {currentSlide === 1 && uniqueStoresForFilter.length > 0 && (
+              <select
+                value={selectedStoreFilter}
+                onChange={e => setSelectedStoreFilter(e.target.value)}
+                className="bg-[#000000] border border-[#222222] hover:border-purple-500/50 focus:border-purple-500 rounded-xl h-[34px] px-3 text-xs text-white focus:outline-none transition-all cursor-pointer ml-2"
+              >
+                <option value="">All Store Names</option>
+                {uniqueStoresForFilter.map((s: any) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            )}
+
+            <Button
+              onClick={() => setIsOverviewOpen(!isOverviewOpen)}
+              variant="secondary"
+              className="bg-[#222222] hover:bg-[#333333] text-white font-bold text-xs px-4 h-[34px] rounded-xl transition-all flex items-center gap-2 ml-2"
+            >
+              Overview {isOverviewOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </Button>
 
             <Button
               onClick={handleDownloadExcel}
@@ -236,6 +416,44 @@ export default function AdminReportsTab({
             </Button>
           </div>
         </div>
+
+        <AnimatePresence>
+          {isOverviewOpen && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden mb-6"
+            >
+              <div className="bg-[#151515] border border-[#222222] rounded-2xl p-4">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent border-b border-[#222222]">
+                      <TableHead>{currentSlide === 1 ? 'Store Name' : 'Counter Name'}</TableHead>
+                      <TableHead className="text-right">Total Uploaded</TableHead>
+                      <TableHead className="text-right">Discrepancies</TableHead>
+                      <TableHead className="text-right">Matched Cases</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {currentOverviewData.length === 0 ? (
+                       <TableRow>
+                         <TableCell colSpan={4} className="text-center text-text-secondary py-4">No data available.</TableCell>
+                       </TableRow>
+                    ) : currentOverviewData.map((stat, idx) => (
+                      <TableRow key={idx} className="border-b border-[#222222]/50 hover:bg-[#222222]/20">
+                        <TableCell className="font-bold text-white">{stat.name}</TableCell>
+                        <TableCell className="text-right text-text-secondary font-mono">{stat.uploaded}</TableCell>
+                        <TableCell className="text-right text-orange-400 font-mono font-semibold">{stat.discrepancies}</TableCell>
+                        <TableCell className="text-right text-emerald-400 font-mono font-semibold">{stat.matched}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Error Popup */}
         {errorMessage && (
@@ -259,12 +477,6 @@ export default function AdminReportsTab({
             <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
             <span>Loading live reports from Supabase...</span>
           </div>
-        ) : currentSlide !== 3 && reportsData.length === 0 ? (
-          <div className="text-center py-16 text-emerald-400 font-semibold bg-emerald-500/5 rounded-2xl border border-emerald-500/10 shadow-lg">
-            {reportsFilterDate 
-              ? "Perfect match! No discrepancies found on this date."
-              : "Awesome! No live discrepancy reports found in the database."}
-          </div>
         ) : (
           <div>
             {(currentSlide === 1 || currentSlide === 2) && (
@@ -277,42 +489,142 @@ export default function AdminReportsTab({
                     ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' 
                     : 'bg-orange-500/10 text-orange-400 border-orange-500/20'
                 }`}>
-                  {reportsData.length} {currentSlide === 1 ? 'Cards Mismatched' : 'Duplicate Entries'}
+                  {filteredReportsData.length} {currentSlide === 1 ? 'Cards Mismatched' : 'Duplicate Entries'}
                 </span>
               </div>
             )}
             {currentSlide === 0 ? (
               /* Slide 0: Missing in Admin (Grouped by Counter Cards) */
+              selectedCounterForStores ? (
+                <div>
+                  <div className="flex items-center gap-4 mb-6 animate-in fade-in slide-in-from-left-4">
+                    <Button variant="ghost" onClick={() => setSelectedCounterForStores(null)} className="text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 rounded-xl px-4 py-2">
+                      <ChevronLeft className="w-5 h-5 mr-1" /> Back to Counters
+                    </Button>
+                    <h3 className="text-xl font-bold text-white">Store IDs for {selectedCounterForStores.username}</h3>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
+                    {Object.values(selectedCounterForStores.storeGroups).map((storeGroup: any, idx: number) => (
+                      <motion.div
+                        key={`store_${idx}`}
+                        initial={{ opacity: 0, y: 15 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        whileHover={{ y: -6, scale: 1.02 }}
+                        onClick={() => onOpenGroupDetails({
+                          counterId: selectedCounterForStores.counterId,
+                          counterName: storeGroup.storeId,
+                          reports: storeGroup.reports,
+                          totalAmount: storeGroup.totalAmount
+                        })}
+                        className="group relative bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] hover:border-purple-500/40 p-6 rounded-2xl transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between"
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                        <div>
+                          <div className="flex items-center justify-between mb-4">
+                            <span className="inline-flex items-center justify-center p-2.5 rounded-xl bg-purple-500/10 text-purple-400">
+                              <Users className="w-5 h-5" />
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
+                              Store ID
+                            </span>
+                          </div>
+                          <h4 className="text-lg font-bold text-white group-hover:text-purple-300 transition-colors line-clamp-2">
+                            {storeGroup.storeId}
+                          </h4>
+                          <p className="text-xs text-text-secondary mt-2">
+                            Discrepancy: <span className="text-white font-bold">{storeGroup.reports.length} items</span> completely missing in Admin spreadsheet.
+                          </p>
+                        </div>
+                        <div className="mt-6 pt-4 border-t border-[#222222]/80 flex items-center justify-between">
+                          <span className="text-sm font-mono text-purple-400 font-bold">
+                            ₹{storeGroup.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </span>
+                          <span className="text-xs text-purple-400 group-hover:underline font-bold transition-all flex items-center gap-1">
+                            Inspect details <span>→</span>
+                          </span>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
+                  {filteredGroupedReportsByCounter
+                    .filter(g => !selectedCounterFilter || g.username === selectedCounterFilter)
+                    .map((group, idx) => (
+                    <motion.div
+                      key={`${group.counterId || 'unknown'}_${idx}`}
+                      initial={{ opacity: 0, y: 15 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      whileHover={{ y: -6, scale: 1.02 }}
+                      onClick={() => setSelectedCounterForStores(group)}
+                      className="group relative bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] hover:border-purple-500/40 p-6 rounded-2xl transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between"
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                      <div>
+                        <div className="flex items-center justify-between mb-4">
+                          <span className="inline-flex items-center justify-center p-2.5 rounded-xl bg-purple-500/10 text-purple-400">
+                            <Users className="w-5 h-5" />
+                          </span>
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
+                            Unmatched
+                          </span>
+                        </div>
+                        <h4 className="text-lg font-bold text-white group-hover:text-purple-300 transition-colors">
+                          {group.username}
+                        </h4>
+                        <p className="text-xs text-text-secondary mt-1">
+                          Discrepancy: <span className="text-white font-bold">{group.reports.length} items</span> completely missing in Admin spreadsheet.
+                        </p>
+                      </div>
+                      <div className="mt-6 pt-4 border-t border-[#222222]/80 flex items-center justify-between">
+                        <span className="text-sm font-mono text-purple-400 font-bold">
+                          ₹{group.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </span>
+                        <span className="text-xs text-purple-400 group-hover:underline font-bold transition-all flex items-center gap-1">
+                          View Store IDs <span>→</span>
+                        </span>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )
+            ) : currentSlide === 1 ? (
+              /* Slide 1: Missing in Counter (Grouped by Store Name and Store ID) */
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
-                {groupedReportsByCounter.map((group, idx) => (
+                {groupedMissingInCounter
+                  .filter((g: any) => !selectedStoreFilter || g.storeName === selectedStoreFilter)
+                  .map((group: any, idx: number) => (
                   <motion.div
-                    key={`${group.counterId || 'unknown'}_${idx}`}
+                    key={`missing_counter_${idx}`}
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
                     whileHover={{ y: -6, scale: 1.02 }}
-                    onClick={() => onOpenGroupDetails(group)}
+                    onClick={() => onOpenGroupDetails({
+                      counterId: null,
+                      counterName: group.storeName === 'Unassigned Mismatches' ? 'Unassigned Mismatches' : `${group.storeName} - ${group.storeId}`,
+                      reports: group.reports,
+                      totalAmount: group.totalAmount
+                    })}
                     className="group relative bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] hover:border-purple-500/40 p-6 rounded-2xl transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between"
                   >
                     <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-
                     <div>
                       <div className="flex items-center justify-between mb-4">
                         <span className="inline-flex items-center justify-center p-2.5 rounded-xl bg-purple-500/10 text-purple-400">
                           <Users className="w-5 h-5" />
                         </span>
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
-                          Unmatched
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+                          Missing in Counter
                         </span>
                       </div>
-
-                      <h4 className="text-lg font-bold text-white group-hover:text-purple-300 transition-colors">
-                        {group.counterName}
+                      <h4 className="text-lg font-bold text-white group-hover:text-purple-300 transition-colors line-clamp-2">
+                        {group.storeName === 'Unassigned Mismatches' ? 'Unassigned Mismatches' : `${group.storeName} - ${group.storeId}`}
                       </h4>
-                      <p className="text-xs text-text-secondary mt-1">
-                        Discrepancy: <span className="text-white font-bold">{group.reports.length} items</span> completely missing in Admin spreadsheet.
+                      <p className="text-xs text-text-secondary mt-2">
+                        Discrepancy: <span className="text-white font-bold">{group.reports.length} items</span> found in Admin but missing in Counter.
                       </p>
                     </div>
-
                     <div className="mt-6 pt-4 border-t border-[#222222]/80 flex items-center justify-between">
                       <span className="text-sm font-mono text-purple-400 font-bold">
                         ₹{group.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
@@ -324,46 +636,10 @@ export default function AdminReportsTab({
                   </motion.div>
                 ))}
               </div>
-            ) : currentSlide === 3 ? (
-              /* Slide 3: Overview */
-              <div className="bg-[#151515] border border-[#222222] rounded-2xl p-6">
-                {overviewLoading ? (
-                  <div className="flex justify-center py-10">
-                    <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-                  </div>
-                ) : overviewData?.length === 0 ? (
-                  <div className="text-center py-10 text-text-secondary">No overview data available.</div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="hover:bg-transparent border-b border-[#222222]">
-                        <TableHead>Counter Name</TableHead>
-                        <TableHead className="text-right">Total Uploaded</TableHead>
-                        <TableHead className="text-right">Discrepancies</TableHead>
-                        <TableHead className="text-right">Matched Cases</TableHead>
-                        <TableHead className="text-right">Match Rate</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {overviewData?.map(stat => (
-                        <TableRow key={stat.counterId} className="border-b border-[#222222]/50 hover:bg-[#222222]/20">
-                          <TableCell className="font-bold text-white">{stat.counterName}</TableCell>
-                          <TableCell className="text-right text-text-secondary font-mono">{stat.uploaded}</TableCell>
-                          <TableCell className="text-right text-orange-400 font-mono font-semibold">{stat.discrepancies}</TableCell>
-                          <TableCell className="text-right text-emerald-400 font-mono font-semibold">{stat.matched}</TableCell>
-                          <TableCell className="text-right text-purple-400 font-mono font-semibold">
-                            {stat.uploaded > 0 ? ((stat.matched / stat.uploaded) * 100).toFixed(1) + '%' : '-'}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </div>
             ) : (
-              /* Slide 1 & Slide 2: Render premium individual cards */
+              /* Slide 2: Duplicate UPIs Render premium individual cards */
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
-                {[...reportsData]
+                {filteredReportsData
                   .sort((a, b) => {
                     const aEdited = a.details?.is_edited === true;
                     const bEdited = b.details?.is_edited === true;
@@ -373,6 +649,7 @@ export default function AdminReportsTab({
                   })
                   .map((report) => {
                   const isEditing = editingReportId === report.id;
+                  const isRemarking = remarkingReportId === report.id;
                   const isEditedAndFailed = report.details?.is_edited === true && report.details?.is_failed_match === true;
                   return (
                   <motion.div
@@ -443,6 +720,12 @@ export default function AdminReportsTab({
                                 : 'Multiple transaction instances found on this date.'
                             )}
                           </p>
+                          {report.details?.admin_remark && (
+                            <div className="mt-3 p-2 rounded-lg bg-purple-500/10 border border-purple-500/20">
+                              <p className="text-[10px] uppercase tracking-wider text-purple-400 font-semibold mb-1">Admin Remark</p>
+                              <p className="text-xs text-white leading-relaxed">{report.details.admin_remark}</p>
+                            </div>
+                          )}
                         </>
                       )}
                     </div>
@@ -493,8 +776,76 @@ export default function AdminReportsTab({
                             {isSaving ? "Saving..." : "Save"}
                           </Button>
                         </div>
+                      ) : isRemarking ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            value={editRemark}
+                            onChange={e => setEditRemark(e.target.value)}
+                            placeholder="Type remark..."
+                            className="w-[120px] bg-[#000000] border border-blue-500/50 focus:border-blue-500 rounded-lg h-7 px-2 text-[10px] text-white focus:outline-none transition-all"
+                            autoFocus
+                            onClick={e => e.stopPropagation()}
+                            onKeyDown={async (e) => {
+                              if (e.key === 'Enter') {
+                                e.stopPropagation();
+                                setIsSaving(true);
+                                try {
+                                  if (onAddRemark) await onAddRemark(report.id, editRemark);
+                                  setRemarkingReportId(null);
+                                } finally {
+                                  setIsSaving(false);
+                                }
+                              }
+                            }}
+                          />
+                          <Button 
+                            variant="primary" 
+                            size="sm" 
+                            disabled={isSaving}
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              setIsSaving(true);
+                              try {
+                                if (onAddRemark) await onAddRemark(report.id, editRemark);
+                                setRemarkingReportId(null);
+                              } finally {
+                                setIsSaving(false);
+                              }
+                            }}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-[10px] h-7 px-2"
+                          >
+                            {isSaving ? "..." : "Save"}
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            disabled={isSaving}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRemarkingReportId(null);
+                            }}
+                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10 font-semibold rounded-lg text-[10px] h-7 px-2"
+                          >
+                            Cancel
+                          </Button>
+                        </div>
                       ) : (
                         <div className="flex items-center gap-1">
+                          {onAddRemark && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRemarkingReportId(report.id);
+                                setEditRemark(report.details?.admin_remark || "");
+                              }}
+                              className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 px-2 font-semibold rounded-lg text-[10px] h-7"
+                            >
+                              Remark
+                            </Button>
+                          )}
                           {onEditReport && (
                             <Button
                               variant="ghost"

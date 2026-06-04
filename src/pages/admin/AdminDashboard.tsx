@@ -86,7 +86,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
   // Slider State
   const [currentSlide, setCurrentSlide] = useState(0);
-  const slides = ['Missing in Admin', 'Missing in Counter', 'Duplicate UPI IDs', 'Overview'];
+  const slides = ['Missing in Admin', 'Missing in Counter', 'Duplicate UPI IDs'];
 
   // Live Excel Upload State (Admin)
   const adminFileInputRef = useRef<HTMLInputElement>(null);
@@ -125,9 +125,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     totalAmount: number;
   } | null>(null);
 
-  // Selected backlog counter details panel state
-  const [selectedBacklogCounter, setSelectedBacklogCounter] = useState<any | null>(null);
-
+  // Selected backlog counter details panel state is removed.
   // Selected duplicate report for details modal
   const [selectedDuplicateReport, setSelectedDuplicateReport] = useState<any | null>(null);
 
@@ -135,29 +133,48 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [totalDiscrepancies, setTotalDiscrepancies] = useState(0);
   const [totalExcelEntries, setTotalExcelEntries] = useState(0);
 
-  // Overview Data State
-  const [overviewData, setOverviewData] = useState<any[]>([]);
-  const [overviewLoading, setOverviewLoading] = useState(false);
+
+  // Upload metrics for the overview slide (Total Uploaded logic)
+  const [uploadMetrics, setUploadMetrics] = useState<{
+    byCounter: Record<string, number>;
+    byStore: Record<string, number>;
+    byAdmin: number;
+  }>({ byCounter: {}, byStore: {}, byAdmin: 0 });
 
   // Group reportsData by Counter dynamically for Slide 0
   const groupedReportsByCounter = useMemo(() => {
     if (currentSlide !== 0) return [];
     
-    const groups: { [key: string]: { counterId: number | null; counterName: string; reports: any[]; totalAmount: number } } = {};
+    const groups: { [key: string]: { counterId: number | null; username: string; counterName: string; storeGroups: { [key: string]: { storeId: string; reports: any[]; totalAmount: number } }; reports: any[]; totalAmount: number } } = {};
     
     reportsData.forEach(r => {
       const cId = r.counter_id;
-      const cName = r.details?.counter_name || r.users?.counter_name || `Counter ${cId || 'Unknown'}`;
+      const username = r.users?.username || `Counter ${cId || 'Unknown'}`;
+      const storeId = r.details?.counter_name || r.users?.counter_name || 'Unknown Store ID';
       const key = cId ? String(cId) : 'unknown';
       
       if (!groups[key]) {
         groups[key] = {
           counterId: cId,
-          counterName: cName,
+          username: username,
+          counterName: username,
+          storeGroups: {},
           reports: [],
           totalAmount: 0
         };
       }
+      
+      if (!groups[key].storeGroups[storeId]) {
+        groups[key].storeGroups[storeId] = {
+          storeId: storeId,
+          reports: [],
+          totalAmount: 0
+        };
+      }
+      
+      groups[key].storeGroups[storeId].reports.push(r);
+      groups[key].storeGroups[storeId].totalAmount += Number(r.amount);
+      
       groups[key].reports.push(r);
       groups[key].totalAmount += Number(r.amount);
     });
@@ -201,9 +218,6 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         .limit(1);
 
       if (!error && data && data.length > 0) {
-        // Keep initial filters empty so all entries are visible on first load
-        // setReportsFilterDate(data[0].date);
-        // setBacklogFilterDate(data[0].date);
       }
     } catch (e) {
       console.error('Failed to fetch latest data date:', e);
@@ -232,61 +246,13 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     }
   };
 
-  const fetchOverviewData = async () => {
-    if (activeTab !== 'reports' || currentSlide !== 3) return;
-    
-    setOverviewLoading(true);
-    try {
-      let txQuery = supabase.from('transactions').select('counter_id, source');
-      if (reportsFilterDate) txQuery = txQuery.eq('date', reportsFilterDate);
-      
-      let repQuery = supabase.from('reports').select('counter_id, type');
-      if (reportsFilterDate) repQuery = repQuery.eq('date', reportsFilterDate);
-      
-      const [txRes, repRes] = await Promise.all([txQuery, repQuery]);
-      
-      if (txRes.error || repRes.error) throw new Error('Failed to fetch overview data');
-      
-      const stats = counters.map(counter => {
-        const uploaded = (txRes.data || []).filter(t => t.source === 'counter' && t.counter_id === counter.id).length;
-        const missingInAdmin = (repRes.data || []).filter(r => r.type === 'missing_in_admin' && r.counter_id === counter.id).length;
-        const duplicateUpi = (repRes.data || []).filter(r => r.type === 'duplicate_upi' && r.counter_id === counter.id).length;
-        
-        const discrepancies = missingInAdmin + duplicateUpi;
-        const matched = uploaded - discrepancies;
-        
-        return {
-          counterId: counter.id,
-          counterName: counter.name,
-          uploaded,
-          discrepancies,
-          matched: matched > 0 ? matched : 0
-        };
-      });
-      
-      setOverviewData(stats);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setOverviewLoading(false);
-    }
-  };
-
   useEffect(() => {
     fetchCounters();
     fetchLatestDate();
     fetchSystemMetrics();
   }, []);
 
-  useEffect(() => {
-    if (activeTab === 'reports' && currentSlide === 3) {
-      fetchOverviewData();
-    }
-  }, [activeTab, currentSlide, reportsFilterDate, counters]);
-
   const fetchReports = async () => {
-    if (currentSlide === 3) return; // Overview slide doesn't use reportsData
-    
     try {
       setReportsLoading(true);
       const reportType = currentSlide === 0 
@@ -297,7 +263,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
       let query = supabase
         .from('reports')
-        .select('*, users(counter_name)')
+        .select('*, users(counter_name, username)')
         .eq('type', reportType);
 
       if (reportsFilterDate) {
@@ -330,8 +296,43 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     }
   };
 
+  const fetchUploadMetrics = async () => {
+    try {
+      let query = supabase.from('transactions').select('upi_id, source, users(username)');
+      if (reportsFilterDate) {
+        query = query.eq('date', reportsFilterDate);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        const metrics = { byCounter: {} as Record<string, number>, byStore: {} as Record<string, number>, byAdmin: 0 };
+        data.forEach((tx: any) => {
+          if (tx.source === 'counter') {
+            const username = tx.users?.username || 'Unknown';
+            metrics.byCounter[username] = (metrics.byCounter[username] || 0) + 1;
+          } else if (tx.source === 'admin') {
+            metrics.byAdmin += 1;
+            const parts = String(tx.upi_id).split('|||');
+            if (parts.length >= 3) {
+              const storeName = parts[1] || 'Unknown Store';
+              const storeId = parts[2] || 'Unknown ID';
+              const key = `${storeName} - ${storeId}`;
+              metrics.byStore[key] = (metrics.byStore[key] || 0) + 1;
+            } else {
+              const key = 'Unassigned Mismatches';
+              metrics.byStore[key] = (metrics.byStore[key] || 0) + 1;
+            }
+          }
+        });
+        setUploadMetrics(metrics);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
     fetchReports();
+    fetchUploadMetrics();
   }, [reportsFilterDate, currentSlide, activeTab]);
 
   // Group transactions dynamically from the database to represent history uploads
@@ -395,12 +396,6 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       setCounterUploads(counterList);
       setAdminUploads(Object.values(adminGroup).sort((a, b) => b.date.localeCompare(a.date)));
 
-      // Also dynamically update the active selectedBacklogCounter if it was opened
-      setSelectedBacklogCounter((prev: any) => {
-        if (!prev) return null;
-        const currentUpdated = counterList.find(c => c.counterId === prev.counterId);
-        return currentUpdated || null;
-      });
     } catch (err) {
       console.error(err);
     } finally {
@@ -427,8 +422,11 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         let query = supabase
           .from('transactions')
           .select('*')
-          .eq('date', selectedDetailBatch.date)
           .eq('source', selectedDetailBatch.source);
+
+        if (selectedDetailBatch.date !== 'ALL') {
+          query = query.eq('date', selectedDetailBatch.date);
+        }
 
         if (selectedDetailBatch.source === 'counter' && selectedDetailBatch.counter_id) {
           query = query.eq('counter_id', selectedDetailBatch.counter_id);
@@ -631,6 +629,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               upi_id: c.upi_id,
               amount: c.amount,
               counter_id: c.counter_id,
+              source_id: c.id,
               details: {
                 counter_name: c.users?.counter_name || 'Unknown',
                 cheque_date: c.date,
@@ -660,7 +659,8 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
         // strict validation: missing in counter
         targetAdminTxs.forEach(a => {
-          const keys = String(a.upi_id).split(',').map(k => {
+          const rawUpiId = String(a.upi_id).split('|||')[0].trim();
+          const keys = rawUpiId.split(',').map(k => {
             let key = k.trim().toLowerCase();
             if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
             return key;
@@ -680,16 +680,29 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           }
 
           if (!matchedCounterList) {
+            let adminStoreName = 'Unknown Store';
+            let adminStoreId = 'Unknown ID';
+            const parts = String(a.upi_id).split('|||');
+            if (parts.length >= 3) {
+              adminStoreName = parts[1] || 'Unknown Store';
+              adminStoreId = parts[2] || 'Unknown ID';
+            } else if (parts.length === 2) {
+              adminStoreName = parts[1] || 'Unknown Store';
+            }
+
             reportsToInsert.push({
               date,
               type: 'missing_in_counter',
-              upi_id: a.upi_id,
+              upi_id: rawUpiId,
               amount: a.amount,
               counter_id: null,
+              source_id: a.id,
               details: {
                 admin_amount: a.amount,
                 transaction_date: a.date,
-                message: `Transaction UTR '${a.upi_id}' is available in Admin but missing from all Counter sheets.`
+                admin_store_name: adminStoreName,
+                admin_store_id: adminStoreId,
+                message: `Transaction UTR '${rawUpiId}' is available in Admin but missing from all Counter sheets.`
               }
             });
           }
@@ -817,17 +830,20 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           throw new Error('The selected Admin Excel sheet is empty.');
         }
 
-        // Fuzzy match required headers
         const phonepeSynonyms = ['phonepereferenceid', 'phonepeid', 'phonepe', 'phonepereference'];
         const utrSynonyms = ['transactionutr', 'utr', 'transactionid', 'upiid', 'chequeno', 'chequenumber', 'cheque_number', 'referenceno', 'refno'];
         const dateSynonyms = ['transactiondate', 'transaction_date', 'date', 'chequedate', 'cheque_date', 'uploaddate'];
         const amountSynonyms = ['totaltransactionamount', 'upiamount', 'amount', 'receipt', 'receiptamount', 'receipt_amount', 'value'];
+        const storeNameSynonyms = ['storename', 'merchantname', 'legalname', 'store_name', 'merchant_name', 'countername'];
+        const storeIdSynonyms = ['storeid', 'merchantid', 'terminalid', 'mid', 'tid', 'store_id', 'merchant_id'];
 
         const firstRow = rows[0];
         const phonepeKey = findHeaderKey(firstRow, phonepeSynonyms);
         const utrKey = findHeaderKey(firstRow, utrSynonyms);
         const dateKey = findHeaderKey(firstRow, dateSynonyms);
         const amountKey = findHeaderKey(firstRow, amountSynonyms);
+        const storeNameKey = findHeaderKey(firstRow, storeNameSynonyms);
+        const storeIdKey = findHeaderKey(firstRow, storeIdSynonyms);
 
         if ((!phonepeKey && !utrKey) || !dateKey || !amountKey) {
           throw new Error(
@@ -853,11 +869,19 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             if (id) identifiers.add(id);
           }
 
-          const upiId = Array.from(identifiers).join(',');
-          if (!upiId) return;
-
           const rawDate = row[dateKey];
           const rawAmount = row[amountKey];
+          
+          let rowStoreName = storeNameKey ? String(row[storeNameKey]).trim() : '';
+          let rowStoreId = storeIdKey ? String(row[storeIdKey]).trim() : '';
+          
+          // Append Store Name and Store ID to the UPI ID for reconciliation tracking
+          let finalUpiId = Array.from(identifiers).join(',');
+          if (!finalUpiId) return;
+          
+          if (rowStoreName || rowStoreId) {
+            finalUpiId += `|||${rowStoreName}|||${rowStoreId}`;
+          }
 
           const dateStr = parseExcelDate(rawDate);
           const amountNum = parseExcelAmount(rawAmount);
@@ -865,7 +889,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           if (!dateStr) return;
 
           transactionsToInsert.push({
-            upi_id: upiId,
+            upi_id: finalUpiId,
             date: dateStr,
             amount: amountNum,
             source: 'admin',
@@ -1001,7 +1025,6 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         if (txError) throw new Error(`Failed to clear counter transactions: ${txError.message}`);
         
         alert("🎉 Counter Backlog wiped successfully!");
-        setSelectedBacklogCounter(null);
         setSelectedDetailBatch(null);
         setSelectedReportCounterGroup(null);
         fetchBacklogHistory();
@@ -1070,6 +1093,43 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             ...prev,
             reports: updatedReports,
             totalAmount: updatedTotal
+          };
+        });
+        fetchReports();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleAddRemark = async (reportId: number, remark: string) => {
+    try {
+      const { data: originalReport, error: getReportError } = await supabase
+        .from('reports')
+        .select('*')
+        .eq('id', reportId)
+        .single();
+      
+      if (getReportError || !originalReport) {
+        alert('Error retrieving report details: ' + (getReportError?.message || 'Report not found'));
+        return;
+      }
+
+      const updatedDetails = { ...originalReport.details, admin_remark: remark };
+
+      const { error } = await supabase
+        .from('reports')
+        .update({ details: updatedDetails })
+        .eq('id', reportId);
+
+      if (error) {
+        alert('Error adding remark: ' + error.message);
+      } else {
+        setSelectedReportCounterGroup((prev) => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            reports: prev.reports.map(r => r.id === reportId ? { ...r, details: updatedDetails } : r)
           };
         });
         fetchReports();
@@ -1183,13 +1243,19 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       // 3. Find the transaction in the transactions table
       let findTxQuery = supabase
         .from('transactions')
-        .select('id')
-        .eq('upi_id', originalReport.upi_id)
-        .eq('date', originalReport.date)
+        .select('id, upi_id')
         .eq('source', source);
 
-      if (source === 'counter' && originalReport.counter_id) {
-        findTxQuery = findTxQuery.eq('counter_id', originalReport.counter_id);
+      if (originalReport.source_id) {
+        findTxQuery = findTxQuery.eq('id', originalReport.source_id);
+      } else {
+        findTxQuery = findTxQuery
+          .eq('upi_id', originalReport.upi_id)
+          .eq('date', originalReport.date);
+          
+        if (source === 'counter' && originalReport.counter_id) {
+          findTxQuery = findTxQuery.eq('counter_id', originalReport.counter_id);
+        }
       }
 
       const { data: txs, error: txError } = await findTxQuery;
@@ -1201,10 +1267,20 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       // 4. Update the transaction in the transactions table if found
       if (txs && txs.length > 0) {
         const txIds = txs.map(t => t.id);
+        let finalNewUpiId = newUpiId;
+        
+        // Preserve Store Name and Store ID suffixes for admin transactions
+        if (source === 'admin' && txs[0].upi_id) {
+          const parts = String(txs[0].upi_id).split('|||');
+          if (parts.length > 1) {
+            finalNewUpiId = newUpiId + '|||' + parts.slice(1).join('|||');
+          }
+        }
+        
         const { error: updateTxError } = await supabase
           .from('transactions')
           .update({
-            upi_id: newUpiId,
+            upi_id: finalNewUpiId,
             amount: newAmount
           })
           .in('id', txIds);
@@ -1407,10 +1483,10 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             onOpenGroupDetails={setSelectedReportCounterGroup}
             groupedReportsByCounter={groupedReportsByCounter}
             onEditReport={handleEditReport}
+            onAddRemark={handleAddRemark}
             onMatchReport={handleMatchReport}
             onOpenDuplicateDetails={setSelectedDuplicateReport}
-            overviewData={overviewData}
-            overviewLoading={overviewLoading}
+            uploadMetrics={uploadMetrics}
           />
         )}
 
@@ -1429,8 +1505,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             onWipeCounterBacklog={handleWipeCounterBacklog}
             onDeleteBatch={handleDeleteBatch}
             onOpenBatchDetails={setSelectedDetailBatch}
-            selectedBacklogCounter={selectedBacklogCounter}
-            setSelectedBacklogCounter={setSelectedBacklogCounter}
+            setSelectedBacklogCounter={() => {}}
             onRefreshLogs={fetchBacklogHistory}
           />
         )}
@@ -1454,6 +1529,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         reportsFilterDate={reportsFilterDate}
         onResolveReport={handleResolveReport}
         onEditReport={handleEditReport}
+        onAddRemark={handleAddRemark}
         onMatchReport={handleMatchReport}
         onMatchAllReports={handleMatchAllReports}
       />

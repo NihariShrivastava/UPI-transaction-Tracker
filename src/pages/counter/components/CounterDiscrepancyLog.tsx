@@ -165,6 +165,11 @@ export default function CounterDiscrepancyLog({
                     <span className="block text-[11px] font-semibold text-text-secondary">
                       Amount: <span className="text-purple-400 font-bold">₹{Number(report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                     </span>
+                    {report.details?.admin_remark && (
+                      <span className="block text-[11px] font-semibold text-text-secondary pt-1">
+                        Admin Remark: <span className="text-emerald-400 font-bold">{report.details.admin_remark}</span>
+                      </span>
+                    )}
                   </div>
                   <p className="text-[11px] text-text-secondary leading-relaxed pt-1.5 border-t border-[#222222]/50 italic">
                     {report.details?.message || 'Check amount and transaction reference matches.'}

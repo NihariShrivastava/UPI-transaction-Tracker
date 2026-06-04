@@ -447,10 +447,16 @@ export default function CounterDashboard({ username, onLogout }: { username: str
             continue;
           }
 
-          // Extract PhonePe ID from column values (e.g. SKC SALES PHONE PE ID (83010307590))
+          // Extract PhonePe ID from column values and keys
           for (const row of rows) {
             for (const key of Object.keys(row)) {
               const val = String(row[key]).trim();
+              const keyStr = String(key).trim();
+              
+              if (keyStr.toUpperCase().includes('PHONE PE ID') || keyStr.toUpperCase().includes('PHONEPE ID') || keyStr.toUpperCase().includes('SKC SALES')) {
+                phonepeId = keyStr;
+                break;
+              }
               if (val.toUpperCase().includes('PHONE PE ID') || val.toUpperCase().includes('PHONEPE ID') || val.toUpperCase().includes('SKC SALES')) {
                 phonepeId = val;
                 break;

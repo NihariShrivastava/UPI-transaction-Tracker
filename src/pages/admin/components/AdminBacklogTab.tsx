@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Archive, RefreshCw, Trash2, Users, Loader2 } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '../../../components/ui/Table';
@@ -19,7 +19,6 @@ interface AdminBacklogTabProps {
   onWipeCounterBacklog: () => void;
   onDeleteBatch: (date: string, source: 'counter' | 'admin', counter_id: number | null) => void;
   onOpenBatchDetails: (batch: any) => void;
-  selectedBacklogCounter: any;
   setSelectedBacklogCounter: (counter: any) => void;
   onRefreshLogs: () => void;
 }
@@ -38,7 +37,6 @@ export default function AdminBacklogTab({
   onWipeCounterBacklog,
   onDeleteBatch,
   onOpenBatchDetails,
-  selectedBacklogCounter,
   setSelectedBacklogCounter,
   onRefreshLogs
 }: AdminBacklogTabProps) {
@@ -238,24 +236,22 @@ export default function AdminBacklogTab({
                 {/* Grid of Counter Boxes */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                   {filteredCounterUploads.map((log) => {
-                    const isSelected = selectedBacklogCounter?.counterId === log.counterId;
                     return (
                       <motion.div
                         key={log.counterId}
                         whileHover={{ y: -4, scale: 1.02 }}
-                        onClick={() => setSelectedBacklogCounter(log)}
-                        className={`group relative p-6 rounded-2xl border transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between ${
-                          isSelected 
-                            ? 'bg-gradient-to-br from-purple-900/30 to-[#111111] border-purple-500/60 shadow-[0_0_20px_rgba(139,92,246,0.15)]' 
-                            : 'bg-gradient-to-br from-[#161616] to-[#0d0d0d] border-[#222222] hover:border-purple-500/30'
-                        }`}
+                        onClick={() => onOpenBatchDetails({
+                          counter_id: log.counterId,
+                          counter_name: log.counterName,
+                          date: 'ALL',
+                          source: 'counter'
+                        })}
+                        className="group relative p-6 rounded-2xl border bg-gradient-to-br from-[#161616] to-[#0d0d0d] border-[#222222] hover:border-purple-500/30 transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between"
                       >
                         <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
 
                         <div className="flex items-center gap-4">
-                          <div className={`p-3 rounded-xl transition-colors ${
-                            isSelected ? 'bg-purple-500 text-white' : 'bg-purple-500/10 text-purple-400'
-                          }`}>
+                          <div className="p-3 rounded-xl bg-purple-500/10 text-purple-400 transition-colors">
                             <Users className="w-5 h-5" />
                           </div>
                           <div className="flex-grow min-w-0">
@@ -276,94 +272,6 @@ export default function AdminBacklogTab({
                     );
                   })}
                 </div>
-
-                {/* Detailed upload date history list for clicked counter */}
-                <AnimatePresence>
-                  {selectedBacklogCounter && (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 20 }}
-                      className="mt-10 p-6 bg-[#161616] border border-purple-500/20 rounded-2xl shadow-2xl relative overflow-hidden animate-in fade-in duration-300"
-                    >
-                      <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent pointer-events-none" />
-
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-[#222222] pb-5 mb-6 gap-4 relative z-10">
-                        <div>
-                          <span className="text-[9px] tracking-widest text-purple-400 font-extrabold uppercase bg-purple-500/10 px-2.5 py-1 rounded-md border border-purple-500/20">
-                            Detailed Upload History
-                          </span>
-                          <h4 className="text-xl font-extrabold text-white mt-2 flex items-center gap-2">
-                            <Users className="w-5 h-5 text-purple-400" />
-                            {selectedBacklogCounter.counterName}
-                          </h4>
-                        </div>
-                        <button 
-                          onClick={() => setSelectedBacklogCounter(null)}
-                          className="text-xs text-text-secondary hover:text-white px-3 py-1.5 rounded-xl bg-[#222222] hover:bg-[#333333] transition-colors border border-[#333333]"
-                        >
-                          Close Detailed View
-                        </button>
-                      </div>
-
-                      <div className="border border-[#222222] rounded-xl overflow-hidden bg-[#111111] relative z-10">
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="hover:bg-transparent border-b border-[#222222] bg-[#1a1a1a]">
-                              <TableHead>Upload Date</TableHead>
-                              <TableHead className="text-center">Transaction Records Count</TableHead>
-                              <TableHead>Execution Status</TableHead>
-                              <TableHead className="text-right">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {selectedBacklogCounter.uploads.map((upload: any, idx: number) => (
-                              <TableRow key={`${upload.date}_${idx}`} className="hover:bg-[#222222]/20 border-b border-[#222222]/50 transition-colors">
-                                <TableCell className="font-mono text-white font-semibold">
-                                  {upload.date}
-                                </TableCell>
-                                <TableCell className="text-center font-mono text-purple-400 font-bold">
-                                  {upload.count} rows
-                                </TableCell>
-                                <TableCell>
-                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                    Completed
-                                  </span>
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <div className="flex justify-end gap-2">
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => onOpenBatchDetails({
-                                        counter_id: selectedBacklogCounter.counterId,
-                                        counter_name: selectedBacklogCounter.counterName,
-                                        date: upload.date,
-                                        source: 'counter'
-                                      })}
-                                      className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-4 font-bold rounded-xl text-xs h-8 transition-all"
-                                    >
-                                      View Transactions
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => onDeleteBatch(upload.date, 'counter', selectedBacklogCounter.counterId)}
-                                      className="text-red-400 hover:text-red-300 hover:bg-red-500/10 px-3 font-bold rounded-xl h-8 transition-all"
-                                      title="Delete transactions for this day"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </Button>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
               </div>
             )}
           </div>

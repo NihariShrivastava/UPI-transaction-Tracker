@@ -22,6 +22,7 @@ interface ReportGroupDetailsModalProps {
   reportsFilterDate: string;
   onResolveReport: (id: number) => void;
   onEditReport: (id: number, newUpiId: string, newAmount: number) => Promise<void>;
+  onAddRemark?: (id: number, remark: string) => Promise<void>;
   onMatchReport?: (id: number) => Promise<boolean>;
   onMatchAllReports?: () => Promise<{ allMatched: boolean, remainingCount: number }>;
 }
@@ -99,13 +100,16 @@ export function ReportGroupDetailsModal({
   reportsFilterDate,
   onResolveReport,
   onEditReport,
+  onAddRemark,
   onMatchReport,
   onMatchAllReports
 }: ReportGroupDetailsModalProps) {
   const [selectedUpiId, setSelectedUpiId] = useState('');
   const [editingReportId, setEditingReportId] = useState<number | null>(null);
+  const [remarkingReportId, setRemarkingReportId] = useState<number | null>(null);
   const [editUpiId, setEditUpiId] = useState('');
   const [editAmount, setEditAmount] = useState('');
+  const [editRemark, setEditRemark] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isMatching, setIsMatching] = useState<{ [key: number]: boolean }>({});
   const [isMatchingAll, setIsMatchingAll] = useState(false);
@@ -129,7 +133,7 @@ export function ReportGroupDetailsModal({
             initial={{ opacity: 0, scale: 0.95, y: 15 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 15 }}
-            className="relative w-full max-w-4xl max-h-[85vh] flex flex-col bg-[#111111] border border-[#222222] shadow-[0_0_50px_rgba(139,92,246,0.15)] rounded-2xl overflow-hidden animate-in fade-in zoom-in duration-300"
+            className="relative w-full max-w-6xl max-h-[85vh] flex flex-col bg-[#111111] border border-[#222222] shadow-[0_0_50px_rgba(139,92,246,0.15)] rounded-2xl overflow-hidden animate-in fade-in zoom-in duration-300"
           >
             {/* Error Popup */}
             <AnimatePresence>
@@ -213,7 +217,7 @@ export function ReportGroupDetailsModal({
                       <TableHead className="w-[80px]">#</TableHead>
                       <TableHead>Cheque Number / UTR</TableHead>
                       <TableHead>Mismatched Amount</TableHead>
-                      <TableHead>Discrepancy Details</TableHead>
+                      <TableHead>Admin Remark</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -228,6 +232,7 @@ export function ReportGroupDetailsModal({
                       })
                       .map((report: any, idx: number) => {
                       const isEditing = editingReportId === report.id;
+                      const isRemarking = remarkingReportId === report.id;
                       const isEditedAndFailed = report.details?.is_edited === true && report.details?.is_failed_match === true;
                       return (
                         <TableRow key={report.id} className={`border-b border-[#222222]/50 transition-colors animate-in slide-in-from-left duration-200 ${isEditedAndFailed ? 'bg-purple-900/30 hover:bg-purple-900/40' : 'hover:bg-[#222222]/20'}`}>
@@ -260,17 +265,12 @@ export function ReportGroupDetailsModal({
                               `₹${Number(report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                             )}
                           </TableCell>
-                          <TableCell className="text-xs text-purple-400 font-medium leading-relaxed max-w-[280px]">
-                            <div className="flex flex-col gap-1.5 items-start w-full">
-                              <span className="truncate w-full block" title={report.details?.message}>
-                                {report.details?.message || `Missing in Admin sheet.`}
-                              </span>
-                              {report.type === 'duplicate_upi' && report.details?.count && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded bg-orange-500/10 border border-orange-500/20 text-orange-400 font-bold text-[10px] tracking-wider uppercase shadow-[0_0_10px_rgba(249,115,22,0.1)]">
-                                  {report.details.count} Duplicates Found
-                                </span>
-                              )}
-                            </div>
+                          <TableCell className="text-xs text-text-secondary">
+                            {report.details?.admin_remark ? (
+                              <span className="text-white bg-purple-500/10 px-2 py-1 rounded-md">{report.details.admin_remark}</span>
+                            ) : (
+                              <span className="opacity-40 italic">None</span>
+                            )}
                           </TableCell>
                           <TableCell className="text-right">
                             {isEditing ? (
@@ -308,8 +308,69 @@ export function ReportGroupDetailsModal({
                                   Cancel
                                 </Button>
                               </div>
+                            ) : isRemarking ? (
+                              <div className="flex justify-end gap-2 items-center">
+                                <input
+                                  type="text"
+                                  value={editRemark}
+                                  onChange={e => setEditRemark(e.target.value)}
+                                  placeholder="Type remark..."
+                                  className="w-[150px] bg-[#000000] border border-blue-500/50 focus:border-blue-500 rounded-xl h-8 px-3 text-xs text-white focus:outline-none transition-all"
+                                  autoFocus
+                                  onKeyDown={async (e) => {
+                                    if (e.key === 'Enter') {
+                                      setIsSaving(true);
+                                      try {
+                                        if (onAddRemark) await onAddRemark(report.id, editRemark);
+                                        setRemarkingReportId(null);
+                                      } finally {
+                                        setIsSaving(false);
+                                      }
+                                    }
+                                  }}
+                                />
+                                <Button 
+                                  variant="primary" 
+                                  size="sm" 
+                                  disabled={isSaving}
+                                  onClick={async () => {
+                                    setIsSaving(true);
+                                    try {
+                                      if (onAddRemark) await onAddRemark(report.id, editRemark);
+                                      setRemarkingReportId(null);
+                                    } finally {
+                                      setIsSaving(false);
+                                    }
+                                  }}
+                                  className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-xs h-8 px-3"
+                                >
+                                  {isSaving ? "..." : "Save"}
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  disabled={isSaving}
+                                  onClick={() => setRemarkingReportId(null)}
+                                  className="text-red-400 hover:text-red-300 hover:bg-red-500/10 font-semibold rounded-lg text-xs h-8 px-3"
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
                             ) : (
                               <div className="flex justify-end gap-2">
+                                {onAddRemark && (
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    onClick={() => {
+                                      setRemarkingReportId(report.id);
+                                      setEditRemark(report.details?.admin_remark || "");
+                                    }}
+                                    className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 px-3 font-semibold rounded-lg text-xs h-8"
+                                  >
+                                    Remark
+                                  </Button>
+                                )}
                                 <Button 
                                   variant="ghost" 
                                   size="sm" 
@@ -403,7 +464,7 @@ export function BatchDetailsModal({
             initial={{ opacity: 0, scale: 0.95, y: 15 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 15 }}
-            className="w-full max-w-4xl max-h-[85vh] flex flex-col bg-[#111111] border border-[#222222] shadow-[0_0_50px_rgba(139,92,246,0.15)] rounded-2xl overflow-hidden"
+            className="w-full max-w-6xl max-h-[85vh] flex flex-col bg-[#111111] border border-[#222222] shadow-[0_0_50px_rgba(139,92,246,0.15)] rounded-2xl overflow-hidden"
           >
             {/* Header */}
             <div className="flex items-center justify-between p-6 border-b border-[#222222] bg-[#161616]">
@@ -529,7 +590,7 @@ export function DuplicateDetailsModal({ report, onClose }: DuplicateDetailsModal
           .from('transactions')
           .select('id, upi_id, amount, date, source, counter_id, users(counter_name)')
           .eq('date', report.date)
-          .eq('upi_id', report.upi_id)
+          .ilike('upi_id', `${report.upi_id}%`)
           .order('source', { ascending: false });
         
         if (!error && data) {
@@ -562,7 +623,7 @@ export function DuplicateDetailsModal({ report, onClose }: DuplicateDetailsModal
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          className="relative w-full max-w-4xl bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+          className="relative w-full max-w-6xl bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
         >
           <div className="flex items-center justify-between p-6 border-b border-[#222222]/50 bg-black/40">
             <div>
@@ -598,6 +659,7 @@ export function DuplicateDetailsModal({ report, onClose }: DuplicateDetailsModal
                     <TableRow className="hover:bg-transparent border-b border-[#222222]/50">
                       <TableHead>Source</TableHead>
                       <TableHead>Counter Name</TableHead>
+                      <TableHead>Cheque/UTR</TableHead>
                       <TableHead className="text-right">Amount (₹)</TableHead>
                       <TableHead className="text-right">Transaction Date</TableHead>
                     </TableRow>
@@ -616,6 +678,9 @@ export function DuplicateDetailsModal({ report, onClose }: DuplicateDetailsModal
                         </TableCell>
                         <TableCell className="font-mono text-white text-sm font-semibold">
                           {tx.source === 'admin' ? 'Admin Sheet' : tx.users?.counter_name || `Counter ${tx.counter_id}`}
+                        </TableCell>
+                        <TableCell className="font-mono text-text-secondary text-xs truncate max-w-[150px]">
+                          {String(tx.upi_id).split('|||')[0]}
                         </TableCell>
                         <TableCell className="text-right font-mono text-purple-400 font-bold">
                           ₹{Number(tx.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
