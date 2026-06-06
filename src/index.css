@@ -16,7 +16,6 @@ body {
   color: var(--color-text-primary);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
-  cursor: none;
 }
 
 /* Custom Scrollbar for dark theme */
@@ -35,7 +34,7 @@ body {
   background: var(--color-dark-hover); 
 }
 
-input, textarea { cursor: text !important; }
+
 
 /* Hide default browser calendar icon in date inputs */
 input[type="date"]::-webkit-calendar-picker-indicator {

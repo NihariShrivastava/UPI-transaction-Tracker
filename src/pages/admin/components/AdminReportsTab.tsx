@@ -48,8 +48,10 @@ export default function AdminReportsTab({
   const [tempFilterDate, setTempFilterDate] = useState(reportsFilterDate);
   const [editingReportId, setEditingReportId] = useState<number | null>(null);
   const [selectedCounterForStores, setSelectedCounterForStores] = useState<any | null>(null);
-  const [selectedCounterFilter, setSelectedCounterFilter] = useState('');
-  const [selectedStoreFilter, setSelectedStoreFilter] = useState('');
+  const [selectedCounterFilter, setSelectedCounterFilter] = useState<string[]>([]);
+  const [isCounterFilterOpen, setIsCounterFilterOpen] = useState(false);
+  const [selectedStoreFilter, setSelectedStoreFilter] = useState<string[]>([]);
+  const [isStoreFilterOpen, setIsStoreFilterOpen] = useState(false);
   const [isOverviewOpen, setIsOverviewOpen] = useState(false);
   const [remarkingReportId, setRemarkingReportId] = useState<number | null>(null);
   const [editUpiId, setEditUpiId] = useState('');
@@ -64,11 +66,48 @@ export default function AdminReportsTab({
     if (!globalSearch.trim()) return groupedReportsByCounter;
     const lower = globalSearch.toLowerCase();
     return groupedReportsByCounter.map(g => {
-      const filteredReports = g.reports.filter((r: any) => 
-        String(r.upi_id || '').toLowerCase().includes(lower) || 
-        String(r.amount || '').includes(lower)
-      );
-      return { ...g, reports: filteredReports };
+      const isCounterMatch = String(g.username || '').toLowerCase().includes(lower);
+      
+      const newStoreGroups: any = {};
+      let newTotalAmount = 0;
+      let newReports: any[] = [];
+
+      if (g.storeGroups) {
+        Object.entries(g.storeGroups).forEach(([storeId, storeGroup]: [string, any]) => {
+          const isStoreMatch = String(storeId || '').toLowerCase().includes(lower);
+          
+          const filteredStoreReports = storeGroup.reports.filter((r: any) => 
+            isCounterMatch || isStoreMatch ||
+            String(r.upi_id || '').toLowerCase().includes(lower) || 
+            String(r.amount || '').includes(lower)
+          );
+
+          if (filteredStoreReports.length > 0) {
+            const storeTotal = filteredStoreReports.reduce((sum: number, r: any) => sum + Number(r.amount), 0);
+            newStoreGroups[storeId] = {
+              ...storeGroup,
+              reports: filteredStoreReports,
+              totalAmount: storeTotal
+            };
+            newTotalAmount += storeTotal;
+            newReports = [...newReports, ...filteredStoreReports];
+          }
+        });
+      } else {
+        newReports = g.reports.filter((r: any) => 
+          isCounterMatch ||
+          String(r.upi_id || '').toLowerCase().includes(lower) || 
+          String(r.amount || '').includes(lower)
+        );
+        newTotalAmount = newReports.reduce((sum: number, r: any) => sum + Number(r.amount), 0);
+      }
+
+      return { 
+        ...g, 
+        reports: newReports,
+        storeGroups: Object.keys(newStoreGroups).length > 0 ? newStoreGroups : g.storeGroups,
+        totalAmount: newTotalAmount
+      };
     }).filter(g => g.reports.length > 0);
   }, [groupedReportsByCounter, globalSearch]);
 
@@ -108,8 +147,10 @@ export default function AdminReportsTab({
     setTempFilterDate('');
     setReportsFilterDate('');
     setSelectedCounterForStores(null);
-    setSelectedCounterFilter('');
-    setSelectedStoreFilter('');
+    setSelectedCounterFilter([]);
+    setIsCounterFilterOpen(false);
+    setSelectedStoreFilter([]);
+    setIsStoreFilterOpen(false);
     setGlobalSearch('');
   };
 
@@ -119,32 +160,43 @@ export default function AdminReportsTab({
 
     if (currentSlide === 0) {
       filename = 'Missing_in_Admin_Report.xlsx';
-      groupedReportsByCounter.forEach((group: any) => {
-        group.reports.forEach((r: any) => {
+      filteredGroupedReportsByCounter
+        .filter(g => selectedCounterFilter.length === 0 || selectedCounterFilter.includes(g.username))
+        .forEach((group: any) => {
+          group.reports.forEach((r: any) => {
+            exportData.push({
+              'Counter Name': group.counterName,
+              'UPI ID / Cheque No': r.upi_id,
+              'Amount': r.amount,
+              'Date': r.date || reportsFilterDate || new Date().toISOString().split('T')[0],
+              'Type': 'Missing in Admin',
+              'Details': r.details?.message || ''
+            });
+          });
+        });
+    } else if (currentSlide === 1) {
+      filename = 'Missing_in_Counter_Report.xlsx';
+      filteredReportsData
+        .filter((r) => {
+          if (selectedStoreFilter.length > 0) {
+             const storeName = r.details?.admin_store_name || 'Unassigned Mismatches';
+             return selectedStoreFilter.includes(storeName);
+          }
+          return true;
+        })
+        .forEach(r => {
           exportData.push({
-            'Counter Name': group.counterName,
-            'UPI ID / Cheque No': r.upi_id,
+            'Store Name': r.details?.admin_store_name || 'Unassigned',
+            'UPI ID / UTR': r.upi_id,
             'Amount': r.amount,
             'Date': r.date || reportsFilterDate || new Date().toISOString().split('T')[0],
-            'Type': 'Missing in Admin',
+            'Type': 'Missing in Counter',
             'Details': r.details?.message || ''
           });
         });
-      });
-    } else if (currentSlide === 1) {
-      filename = 'Missing_in_Counter_Report.xlsx';
-      reportsData.forEach(r => {
-        exportData.push({
-          'UPI ID / UTR': r.upi_id,
-          'Amount': r.amount,
-          'Date': r.date || reportsFilterDate || new Date().toISOString().split('T')[0],
-          'Type': 'Missing in Counter',
-          'Details': r.details?.message || ''
-        });
-      });
     } else if (currentSlide === 2) {
       filename = 'Duplicate_Entries_Report.xlsx';
-      reportsData.forEach(r => {
+      filteredReportsData.forEach(r => {
         exportData.push({
           'Counter Name': r.details?.counter_name || r.users?.counter_name || 'Admin',
           'UPI ID / Ref': r.upi_id,
@@ -363,7 +415,7 @@ export default function AdminReportsTab({
               Apply
             </Button>
 
-            {(reportsFilterDate || selectedCounterFilter || selectedStoreFilter) && (
+            {(reportsFilterDate || selectedCounterFilter.length > 0 || selectedStoreFilter.length > 0) && (
               <Button
                 onClick={handleClearDate}
                 variant="ghost"
@@ -374,29 +426,105 @@ export default function AdminReportsTab({
             )}
 
             {currentSlide === 0 && uniqueCountersForFilter.length > 0 && (
-              <select
-                value={selectedCounterFilter}
-                onChange={e => setSelectedCounterFilter(e.target.value)}
-                className="bg-[#000000] border border-[#222222] hover:border-purple-500/50 focus:border-purple-500 rounded-xl h-[34px] px-3 text-xs text-white focus:outline-none transition-all cursor-pointer ml-2"
-              >
-                <option value="">All Counters</option>
-                {uniqueCountersForFilter.map((c: any) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+              <div className="relative ml-2 z-50">
+                <Button 
+                  onClick={() => setIsCounterFilterOpen(!isCounterFilterOpen)}
+                  variant="outline" 
+                  className="bg-[#000000] border border-[#222222] text-xs h-[34px] rounded-xl text-white px-3 focus:border-purple-500 hover:border-purple-500/50 flex items-center gap-1"
+                >
+                  <span>{selectedCounterFilter.length > 0 ? `${selectedCounterFilter.length} Counters Selected` : 'All Counters'}</span>
+                  {isCounterFilterOpen ? <ChevronUp className="w-3.5 h-3.5 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 shrink-0" />}
+                </Button>
+                
+                {isCounterFilterOpen && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setIsCounterFilterOpen(false)}
+                    />
+                    <div className="absolute top-full left-0 mt-2 w-64 bg-[#111111] border border-[#222222] rounded-xl shadow-2xl z-50 max-h-60 overflow-y-auto p-2">
+                      <label className="flex items-center gap-2 p-2 hover:bg-[#222222] rounded-lg cursor-pointer transition-colors">
+                        <input 
+                          type="checkbox" 
+                          checked={selectedCounterFilter.length === 0}
+                          onChange={() => setSelectedCounterFilter([])}
+                          className="rounded border-[#333333] bg-[#000000] text-purple-500 focus:ring-purple-500"
+                        />
+                        <span className="text-xs text-white font-semibold">All Counters</span>
+                      </label>
+                      <div className="h-px bg-[#222222] my-1" />
+                      {uniqueCountersForFilter.map((c: any) => (
+                        <label key={c} className="flex items-center gap-2 p-2 hover:bg-[#222222] rounded-lg cursor-pointer transition-colors">
+                          <input 
+                            type="checkbox" 
+                            checked={selectedCounterFilter.includes(c)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedCounterFilter([...selectedCounterFilter, c]);
+                              } else {
+                                setSelectedCounterFilter(selectedCounterFilter.filter(x => x !== c));
+                              }
+                            }}
+                            className="rounded border-[#333333] bg-[#000000] text-purple-500 focus:ring-purple-500 shrink-0"
+                          />
+                          <span className="text-xs text-white truncate" title={c}>{c}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             )}
 
             {currentSlide === 1 && uniqueStoresForFilter.length > 0 && (
-              <select
-                value={selectedStoreFilter}
-                onChange={e => setSelectedStoreFilter(e.target.value)}
-                className="bg-[#000000] border border-[#222222] hover:border-purple-500/50 focus:border-purple-500 rounded-xl h-[34px] px-3 text-xs text-white focus:outline-none transition-all cursor-pointer ml-2"
-              >
-                <option value="">All Store Names</option>
-                {uniqueStoresForFilter.map((s: any) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
+              <div className="relative ml-2 z-50">
+                <Button 
+                  onClick={() => setIsStoreFilterOpen(!isStoreFilterOpen)}
+                  variant="outline" 
+                  className="bg-[#000000] border border-[#222222] text-xs h-[34px] rounded-xl text-white px-3 focus:border-purple-500 hover:border-purple-500/50 flex items-center gap-1"
+                >
+                  <span>{selectedStoreFilter.length > 0 ? `${selectedStoreFilter.length} Stores Selected` : 'All Store Names'}</span>
+                  {isStoreFilterOpen ? <ChevronUp className="w-3.5 h-3.5 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 shrink-0" />}
+                </Button>
+                
+                {isStoreFilterOpen && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setIsStoreFilterOpen(false)}
+                    />
+                    <div className="absolute top-full left-0 mt-2 w-64 bg-[#111111] border border-[#222222] rounded-xl shadow-2xl z-50 max-h-60 overflow-y-auto p-2">
+                      <label className="flex items-center gap-2 p-2 hover:bg-[#222222] rounded-lg cursor-pointer transition-colors">
+                        <input 
+                          type="checkbox" 
+                          checked={selectedStoreFilter.length === 0}
+                          onChange={() => setSelectedStoreFilter([])}
+                          className="rounded border-[#333333] bg-[#000000] text-purple-500 focus:ring-purple-500"
+                        />
+                        <span className="text-xs text-white font-semibold">All Store Names</span>
+                      </label>
+                      <div className="h-px bg-[#222222] my-1" />
+                      {uniqueStoresForFilter.map((s: any) => (
+                        <label key={s} className="flex items-center gap-2 p-2 hover:bg-[#222222] rounded-lg cursor-pointer transition-colors">
+                          <input 
+                            type="checkbox" 
+                            checked={selectedStoreFilter.includes(s)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedStoreFilter([...selectedStoreFilter, s]);
+                              } else {
+                                setSelectedStoreFilter(selectedStoreFilter.filter(x => x !== s));
+                              }
+                            }}
+                            className="rounded border-[#333333] bg-[#000000] text-purple-500 focus:ring-purple-500 shrink-0"
+                          />
+                          <span className="text-xs text-white truncate" title={s}>{s}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             )}
 
             <Button
@@ -495,62 +623,67 @@ export default function AdminReportsTab({
             )}
             {currentSlide === 0 ? (
               /* Slide 0: Missing in Admin (Grouped by Counter Cards) */
-              selectedCounterForStores ? (
-                <div>
-                  <div className="flex items-center gap-4 mb-6 animate-in fade-in slide-in-from-left-4">
-                    <Button variant="ghost" onClick={() => setSelectedCounterForStores(null)} className="text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 rounded-xl px-4 py-2">
-                      <ChevronLeft className="w-5 h-5 mr-1" /> Back to Counters
-                    </Button>
-                    <h3 className="text-xl font-bold text-white">Store IDs for {selectedCounterForStores.username}</h3>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
-                    {Object.values(selectedCounterForStores.storeGroups).map((storeGroup: any, idx: number) => (
-                      <motion.div
-                        key={`store_${idx}`}
-                        initial={{ opacity: 0, y: 15 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        whileHover={{ y: -6, scale: 1.02 }}
-                        onClick={() => onOpenGroupDetails({
-                          counterId: selectedCounterForStores.counterId,
-                          counterName: storeGroup.storeId,
-                          reports: storeGroup.reports,
-                          totalAmount: storeGroup.totalAmount
-                        })}
-                        className="group relative bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] hover:border-purple-500/40 p-6 rounded-2xl transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between"
-                      >
-                        <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-                        <div>
-                          <div className="flex items-center justify-between mb-4">
-                            <span className="inline-flex items-center justify-center p-2.5 rounded-xl bg-purple-500/10 text-purple-400">
-                              <Users className="w-5 h-5" />
+              (() => {
+                const activeCounter = selectedCounterForStores 
+                  ? (filteredGroupedReportsByCounter.find(g => g.counterId === selectedCounterForStores.counterId) || selectedCounterForStores)
+                  : null;
+
+                return activeCounter ? (
+                  <div>
+                    <div className="flex items-center gap-4 mb-6 animate-in fade-in slide-in-from-left-4">
+                      <Button variant="ghost" onClick={() => setSelectedCounterForStores(null)} className="text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 rounded-xl px-4 py-2">
+                        <ChevronLeft className="w-5 h-5 mr-1" /> Back to Counters
+                      </Button>
+                      <h3 className="text-xl font-bold text-white">Store IDs for {activeCounter.username}</h3>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
+                      {Object.values(activeCounter.storeGroups || {}).map((storeGroup: any, idx: number) => (
+                        <motion.div
+                          key={`store_${idx}`}
+                          initial={{ opacity: 0, y: 15 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          whileHover={{ y: -6, scale: 1.02 }}
+                          onClick={() => onOpenGroupDetails({
+                            counterId: activeCounter.counterId,
+                            counterName: storeGroup.storeId,
+                            reports: storeGroup.reports,
+                            totalAmount: storeGroup.totalAmount
+                          })}
+                          className="group relative bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] hover:border-purple-500/40 p-6 rounded-2xl transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between"
+                        >
+                          <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                          <div>
+                            <div className="flex items-center justify-between mb-4">
+                              <span className="inline-flex items-center justify-center p-2.5 rounded-xl bg-purple-500/10 text-purple-400">
+                                <Users className="w-5 h-5" />
+                              </span>
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
+                                Store ID
+                              </span>
+                            </div>
+                            <h4 className="text-lg font-bold text-white group-hover:text-purple-300 transition-colors line-clamp-2">
+                              {storeGroup.storeId}
+                            </h4>
+                            <p className="text-xs text-text-secondary mt-2">
+                              Discrepancy: <span className="text-white font-bold">{storeGroup.reports.length} items</span> completely missing in Admin spreadsheet.
+                            </p>
+                          </div>
+                          <div className="mt-6 pt-4 border-t border-[#222222]/80 flex items-center justify-between">
+                            <span className="text-sm font-mono text-purple-400 font-bold">
+                              ₹{storeGroup.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                             </span>
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
-                              Store ID
+                            <span className="text-xs text-purple-400 group-hover:underline font-bold transition-all flex items-center gap-1">
+                              Inspect details <span>→</span>
                             </span>
                           </div>
-                          <h4 className="text-lg font-bold text-white group-hover:text-purple-300 transition-colors line-clamp-2">
-                            {storeGroup.storeId}
-                          </h4>
-                          <p className="text-xs text-text-secondary mt-2">
-                            Discrepancy: <span className="text-white font-bold">{storeGroup.reports.length} items</span> completely missing in Admin spreadsheet.
-                          </p>
-                        </div>
-                        <div className="mt-6 pt-4 border-t border-[#222222]/80 flex items-center justify-between">
-                          <span className="text-sm font-mono text-purple-400 font-bold">
-                            ₹{storeGroup.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </span>
-                          <span className="text-xs text-purple-400 group-hover:underline font-bold transition-all flex items-center gap-1">
-                            Inspect details <span>→</span>
-                          </span>
-                        </div>
-                      </motion.div>
-                    ))}
+                        </motion.div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
-                  {filteredGroupedReportsByCounter
-                    .filter(g => !selectedCounterFilter || g.username === selectedCounterFilter)
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
+                    {filteredGroupedReportsByCounter
+                    .filter(g => selectedCounterFilter.length === 0 || selectedCounterFilter.includes(g.username))
                     .map((group, idx) => (
                     <motion.div
                       key={`${group.counterId || 'unknown'}_${idx}`}
@@ -588,58 +721,19 @@ export default function AdminReportsTab({
                     </motion.div>
                   ))}
                 </div>
-              )
-            ) : currentSlide === 1 ? (
-              /* Slide 1: Missing in Counter (Grouped by Store Name and Store ID) */
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
-                {groupedMissingInCounter
-                  .filter((g: any) => !selectedStoreFilter || g.storeName === selectedStoreFilter)
-                  .map((group: any, idx: number) => (
-                  <motion.div
-                    key={`missing_counter_${idx}`}
-                    initial={{ opacity: 0, y: 15 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    whileHover={{ y: -6, scale: 1.02 }}
-                    onClick={() => onOpenGroupDetails({
-                      counterId: null,
-                      counterName: group.storeName === 'Unassigned Mismatches' ? 'Unassigned Mismatches' : `${group.storeName} - ${group.storeId}`,
-                      reports: group.reports,
-                      totalAmount: group.totalAmount
-                    })}
-                    className="group relative bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] hover:border-purple-500/40 p-6 rounded-2xl transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between"
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-                    <div>
-                      <div className="flex items-center justify-between mb-4">
-                        <span className="inline-flex items-center justify-center p-2.5 rounded-xl bg-purple-500/10 text-purple-400">
-                          <Users className="w-5 h-5" />
-                        </span>
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
-                          Missing in Counter
-                        </span>
-                      </div>
-                      <h4 className="text-lg font-bold text-white group-hover:text-purple-300 transition-colors line-clamp-2">
-                        {group.storeName === 'Unassigned Mismatches' ? 'Unassigned Mismatches' : `${group.storeName} - ${group.storeId}`}
-                      </h4>
-                      <p className="text-xs text-text-secondary mt-2">
-                        Discrepancy: <span className="text-white font-bold">{group.reports.length} items</span> found in Admin but missing in Counter.
-                      </p>
-                    </div>
-                    <div className="mt-6 pt-4 border-t border-[#222222]/80 flex items-center justify-between">
-                      <span className="text-sm font-mono text-purple-400 font-bold">
-                        ₹{group.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </span>
-                      <span className="text-xs text-purple-400 group-hover:underline font-bold transition-all flex items-center gap-1">
-                        Inspect details <span>→</span>
-                      </span>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
+                );
+              })()
             ) : (
-              /* Slide 2: Duplicate UPIs Render premium individual cards */
+              /* Slide 1 & 2: Render individual cards */
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
                 {filteredReportsData
+                  .filter((report) => {
+                    if (currentSlide === 1 && selectedStoreFilter.length > 0) {
+                      const storeName = report.details?.admin_store_name || 'Unassigned Mismatches';
+                      return selectedStoreFilter.includes(storeName);
+                    }
+                    return true;
+                  })
                   .sort((a, b) => {
                     const aEdited = a.details?.is_edited === true;
                     const bEdited = b.details?.is_edited === true;
@@ -720,6 +814,18 @@ export default function AdminReportsTab({
                                 : 'Multiple transaction instances found on this date.'
                             )}
                           </p>
+                          {currentSlide === 1 && (
+                            <div className="mt-2 flex flex-col gap-1">
+                              <span className="inline-flex max-w-fit px-2 py-1 rounded-md bg-[#222222] text-xs font-bold text-white border border-[#333333]">
+                                Store: {report.details?.admin_store_name || 'Unassigned'}
+                              </span>
+                              {(report.details?.admin_store_id && report.details?.admin_store_id !== 'Unknown ID') && (
+                                <span className="inline-flex max-w-fit px-2 py-1 rounded-md bg-[#1a1a1a] text-[10px] text-text-secondary border border-[#2a2a2a]">
+                                  ID: {report.details.admin_store_id}
+                                </span>
+                              )}
+                            </div>
+                          )}
                           {report.details?.admin_remark && (
                             <div className="mt-3 p-2 rounded-lg bg-purple-500/10 border border-purple-500/20">
                               <p className="text-[10px] uppercase tracking-wider text-purple-400 font-semibold mb-1">Admin Remark</p>

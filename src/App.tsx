@@ -2,7 +2,6 @@ import { useState } from 'react';
 import Login from './pages/Login';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import CounterDashboard from './pages/counter/CounterDashboard';
-import CustomCursor from './components/ui/CustomCursor';
 
 type AuthState = {
   isAuthenticated: boolean;
@@ -41,7 +40,6 @@ function App() {
 
   return (
     <>
-      <CustomCursor />
       {!auth.isAuthenticated && <Login onLogin={handleLogin} />}
       {auth.isAuthenticated && auth.role === 'admin' && <AdminDashboard onLogout={handleLogout} />}
       {auth.isAuthenticated && auth.role === 'counter' && <CounterDashboard username={auth.username || ''} onLogout={handleLogout} />}
