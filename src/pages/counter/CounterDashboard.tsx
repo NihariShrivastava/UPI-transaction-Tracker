@@ -87,13 +87,38 @@ export default function CounterDashboard({ username, onLogout }: { username: str
   const fetchUploadHistory = async (userId: number) => {
     try {
       setUploadsLoading(true);
-      const { data, error } = await supabase
-        .from('transactions')
-        .select('date, amount')
-        .eq('source', 'counter')
-        .eq('counter_id', userId);
+      
+      let data: any[] = [];
+      let from = 0;
+      const step = 1000;
+      let keepFetching = true;
 
-      if (!error && data) {
+      while (keepFetching) {
+        const { data: batchData, error } = await supabase
+          .from('transactions')
+          .select('date, amount')
+          .eq('source', 'counter')
+          .eq('counter_id', userId)
+          .range(from, from + step - 1);
+
+        if (error) {
+          console.error(error);
+          keepFetching = false;
+          break;
+        }
+
+        if (batchData && batchData.length > 0) {
+          data = [...data, ...batchData];
+          from += step;
+          if (batchData.length < step) {
+            keepFetching = false;
+          }
+        } else {
+          keepFetching = false;
+        }
+      }
+
+      if (data && data.length > 0) {
         const grouped: { [key: string]: { date: string; count: number; totalAmount: number } } = {};
         data.forEach(item => {
           const d = item.date;

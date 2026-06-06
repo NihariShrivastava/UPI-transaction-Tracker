@@ -298,12 +298,27 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
   const fetchUploadMetrics = async () => {
     try {
-      let query = supabase.from('transactions').select('upi_id, source, users(username)');
-      if (reportsFilterDate) {
-        query = query.eq('date', reportsFilterDate);
+      let data: any[] = [];
+      let from = 0;
+      const step = 1000;
+      let keepFetching = true;
+
+      while (keepFetching) {
+        let query = supabase.from('transactions').select('upi_id, source, users(username)').range(from, from + step - 1);
+        if (reportsFilterDate) {
+          query = query.eq('date', reportsFilterDate);
+        }
+        const { data: batchData, error } = await query;
+        if (error || !batchData || batchData.length === 0) {
+          keepFetching = false;
+        } else {
+          data = [...data, ...batchData];
+          from += step;
+          if (batchData.length < step) keepFetching = false;
+        }
       }
-      const { data, error } = await query;
-      if (!error && data) {
+
+      if (data) {
         const metrics = { byCounter: {} as Record<string, number>, byStore: {} as Record<string, number>, byAdmin: 0 };
         data.forEach((tx: any) => {
           if (tx.source === 'counter') {
@@ -339,13 +354,33 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const fetchBacklogHistory = async () => {
     try {
       setBacklogLoading(true);
-      const { data: txs, error } = await supabase
-        .from('transactions')
-        .select('*, users(counter_name)');
+      
+      let txs: any[] = [];
+      let from = 0;
+      const step = 1000;
+      let keepFetching = true;
 
-      if (error) {
-        console.error('Error fetching backlog transactions:', error);
-        return;
+      while (keepFetching) {
+        const { data, error } = await supabase
+          .from('transactions')
+          .select('*, users(counter_name)')
+          .range(from, from + step - 1);
+
+        if (error) {
+          console.error('Error fetching backlog transactions:', error);
+          keepFetching = false;
+          break;
+        }
+
+        if (data && data.length > 0) {
+          txs = [...txs, ...data];
+          from += step;
+          if (data.length < step) {
+            keepFetching = false;
+          }
+        } else {
+          keepFetching = false;
+        }
       }
 
       // Group by Counter ID first
@@ -958,6 +993,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           setReportsFilterDate(dateArray[0]);
           setBacklogStartDate(dateArray[0]);
           setBacklogEndDate(dateArray[0]);
+          setBacklogSubTab('admin');
         }
 
         setAdminStatus({
