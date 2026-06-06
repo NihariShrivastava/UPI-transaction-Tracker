@@ -429,7 +429,7 @@ export default function AdminReportsTab({
               <div className="relative ml-2 z-50">
                 <Button 
                   onClick={() => setIsCounterFilterOpen(!isCounterFilterOpen)}
-                  variant="outline" 
+                  variant="secondary" 
                   className="bg-[#000000] border border-[#222222] text-xs h-[34px] rounded-xl text-white px-3 focus:border-purple-500 hover:border-purple-500/50 flex items-center gap-1"
                 >
                   <span>{selectedCounterFilter.length > 0 ? `${selectedCounterFilter.length} Counters Selected` : 'All Counters'}</span>
@@ -480,7 +480,7 @@ export default function AdminReportsTab({
               <div className="relative ml-2 z-50">
                 <Button 
                   onClick={() => setIsStoreFilterOpen(!isStoreFilterOpen)}
-                  variant="outline" 
+                  variant="secondary" 
                   className="bg-[#000000] border border-[#222222] text-xs h-[34px] rounded-xl text-white px-3 focus:border-purple-500 hover:border-purple-500/50 flex items-center gap-1"
                 >
                   <span>{selectedStoreFilter.length > 0 ? `${selectedStoreFilter.length} Stores Selected` : 'All Store Names'}</span>
