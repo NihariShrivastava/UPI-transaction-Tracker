@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Archive, RefreshCw, Trash2, Users, Loader2, ChevronLeft } from 'lucide-react';
+import { Archive, RefreshCw, Trash2, Users, Loader2, Download, ChevronLeft } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '../../../components/ui/Table';
 import { Card, CardHeader, CardTitle, CardContent } from '../../../components/ui/Card';
@@ -17,10 +17,10 @@ interface AdminBacklogTabProps {
   setBacklogSubTab: (tab: 'counter' | 'admin') => void;
   onWipeAdminBacklog: () => void;
   onWipeCounterBacklog: () => void;
-  onDeleteBatch: (date: string, source: 'counter' | 'admin', counter_id: number | null) => void;
+  onDeleteBatch: (date: string, source: 'counter' | 'admin', counter_id: number | null, fileName?: string) => void;
+  onDownloadBatch: (date: string, source: 'counter' | 'admin', counter_id: number | null, fileName?: string) => void;
+  onDownloadFullBacklog: (source: 'counter' | 'admin') => void;
   onOpenBatchDetails: (batch: any) => void;
-  selectedBacklogCounter: any;
-  setSelectedBacklogCounter: (counter: any) => void;
   onRefreshLogs: () => void;
 }
 
@@ -37,9 +37,9 @@ export default function AdminBacklogTab({
   onWipeAdminBacklog,
   onWipeCounterBacklog,
   onDeleteBatch,
+  onDownloadBatch,
+  onDownloadFullBacklog,
   onOpenBatchDetails,
-  selectedBacklogCounter,
-  setSelectedBacklogCounter,
   onRefreshLogs
 }: AdminBacklogTabProps) {
   const backlogStartDateInputRef = useRef<HTMLInputElement>(null);
@@ -47,6 +47,12 @@ export default function AdminBacklogTab({
   
   const [tempStartDate, setTempStartDate] = useState(backlogStartDate);
   const [tempEndDate, setTempEndDate] = useState(backlogEndDate);
+  const [selectedCounterId, setSelectedCounterId] = useState<number | null>(null);
+
+  // Sync internal sub tab when switching
+  useEffect(() => {
+    setSelectedCounterId(null);
+  }, [backlogSubTab]);
 
   useEffect(() => {
     setTempStartDate(backlogStartDate);
@@ -91,8 +97,7 @@ export default function AdminBacklogTab({
 
   const cleanCounterName = (name: string) => {
     if (!name) return 'Unknown';
-    // Remove "PHONE PE ID" and any trailing IDs if they exist
-    return name.replace(/PHONE\s*PE\s*ID.*/i, '').trim() || name;
+    return name;
   };
 
 
@@ -116,7 +121,6 @@ export default function AdminBacklogTab({
             <button 
               onClick={() => {
                 setBacklogSubTab('counter');
-                setSelectedBacklogCounter(null);
               }}
               className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
                 backlogSubTab === 'counter' ? 'bg-purple-600 text-white shadow-md' : 'text-text-secondary hover:text-white'
@@ -127,7 +131,6 @@ export default function AdminBacklogTab({
             <button 
               onClick={() => {
                 setBacklogSubTab('admin');
-                setSelectedBacklogCounter(null);
               }}
               className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
                 backlogSubTab === 'admin' ? 'bg-purple-600 text-white shadow-md' : 'text-text-secondary hover:text-white'
@@ -204,27 +207,51 @@ export default function AdminBacklogTab({
 
           {/* Wipe Database Backlog Button (Contextual) */}
           {backlogSubTab === 'counter' ? (
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={onWipeCounterBacklog} 
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600/10 border border-red-500/20 hover:bg-red-600 text-red-400 hover:text-white transition-all font-bold text-xs h-9 shadow-md"
-              title="Permanently wipe all Counter transaction database and reports backlog"
-            >
-              <Trash2 className="w-4 h-4" />
-              Wipe Counter Backlog
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => onDownloadFullBacklog('counter')} 
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600/10 border border-emerald-500/20 hover:bg-emerald-600 text-emerald-400 hover:text-white transition-all font-bold text-xs h-9 shadow-md"
+                title="Download all Counter backlog history"
+              >
+                <Download className="w-4 h-4" />
+                Download Counter Backlog
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={onWipeCounterBacklog} 
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600/10 border border-red-500/20 hover:bg-red-600 text-red-400 hover:text-white transition-all font-bold text-xs h-9 shadow-md"
+                title="Permanently wipe all Counter transaction database and reports backlog"
+              >
+                <Trash2 className="w-4 h-4" />
+                Wipe Counter Backlog
+              </Button>
+            </div>
           ) : (
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={onWipeAdminBacklog} 
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600/10 border border-red-500/20 hover:bg-red-600 text-red-400 hover:text-white transition-all font-bold text-xs h-9 shadow-md"
-              title="Permanently wipe all Admin transaction database and reports backlog"
-            >
-              <Trash2 className="w-4 h-4" />
-              Wipe Admin Backlog
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => onDownloadFullBacklog('admin')} 
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600/10 border border-emerald-500/20 hover:bg-emerald-600 text-emerald-400 hover:text-white transition-all font-bold text-xs h-9 shadow-md"
+                title="Download all Admin backlog history"
+              >
+                <Download className="w-4 h-4" />
+                Download Admin Backlog
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={onWipeAdminBacklog} 
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600/10 border border-red-500/20 hover:bg-red-600 text-red-400 hover:text-white transition-all font-bold text-xs h-9 shadow-md"
+                title="Permanently wipe all Admin transaction database and reports backlog"
+              >
+                <Trash2 className="w-4 h-4" />
+                Wipe Admin Backlog
+              </Button>
+            </div>
           )}
         </div>
       </CardHeader>
@@ -237,121 +264,131 @@ export default function AdminBacklogTab({
           </div>
         ) : backlogSubTab === 'counter' ? (
           <div>
-            {selectedBacklogCounter ? (
-              <div className="animate-in fade-in slide-in-from-right-4">
-                <div className="flex items-center gap-4 mb-6">
-                  <Button variant="ghost" onClick={() => setSelectedBacklogCounter(null)} className="text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 rounded-xl px-4 py-2">
-                    <ChevronLeft className="w-5 h-5 mr-1" /> Back to Counters
-                  </Button>
-                  <h3 className="text-xl font-bold text-white">{cleanCounterName(selectedBacklogCounter.counterName)} Uploads</h3>
-                </div>
-                
-                <div className="border border-[#222222] rounded-2xl overflow-hidden bg-[#0d0d0d] shadow-xl">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="hover:bg-transparent border-b border-[#222222] bg-[#161616]">
-                        <TableHead>Upload Name</TableHead>
-                        <TableHead>Upload Date</TableHead>
-                        <TableHead className="text-center">Total Transaction Records</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {selectedBacklogCounter.uploads.map((upload: any, idx: number) => (
-                        <TableRow key={`${upload.date}_${idx}`} className="hover:bg-[#222222]/10 border-b border-[#222222]/50 transition-colors">
-                          <TableCell className="font-semibold text-white">
-                            <span 
-                              onClick={() => onOpenBatchDetails({
-                                counter_id: selectedBacklogCounter.counterId,
-                                counter_name: selectedBacklogCounter.counterName,
-                                date: upload.date,
-                                source: 'counter'
-                              })}
-                              className="cursor-pointer underline text-purple-400 hover:text-purple-300 font-bold transition-colors"
-                            >
-                              Excel {idx + 1}
-                            </span>
-                          </TableCell>
-                          <TableCell className="font-mono text-text-secondary">{upload.date}</TableCell>
-                          <TableCell className="text-center font-mono text-purple-400 font-bold">{upload.count} rows</TableCell>
-                          <TableCell>
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                              Completed
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => onOpenBatchDetails({
-                                  counter_id: selectedBacklogCounter.counterId,
-                                  counter_name: selectedBacklogCounter.counterName,
-                                  date: upload.date,
-                                  source: 'counter'
-                                })}
-                                className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-4 font-bold rounded-xl text-xs h-8 transition-all"
-                              >
-                                View Transactions
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => onDeleteBatch(upload.date, 'counter', selectedBacklogCounter.counterId)}
-                                className="text-red-400 hover:text-red-300 hover:bg-red-500/10 px-3 font-bold rounded-xl h-8 transition-all"
-                                title="Delete transactions for this day"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-            ) : filteredCounterUploads.length === 0 ? (
+            {filteredCounterUploads.length === 0 ? (
               <div className="text-center py-16 text-text-secondary">
                 No counter transaction uploads found matching active filters.
               </div>
             ) : (
               <div>
-                {/* Grid of Counter Boxes */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {filteredCounterUploads.map((log) => {
-                    return (
-                      <motion.div
-                        key={log.counterId}
-                        whileHover={{ y: -4, scale: 1.02 }}
-                        onClick={() => setSelectedBacklogCounter(log)}
-                        className="group relative p-6 rounded-2xl border bg-gradient-to-br from-[#161616] to-[#0d0d0d] border-[#222222] hover:border-purple-500/30 transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between"
+                {selectedCounterId ? (
+                  <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+                    <div className="flex items-center gap-4">
+                      <Button 
+                        variant="ghost" 
+                        onClick={() => setSelectedCounterId(null)}
+                        className="text-text-secondary hover:text-white px-3"
                       >
-                        <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                        <ChevronLeft className="w-4 h-4 mr-1" /> Back to Counters
+                      </Button>
+                      <h3 className="text-xl font-bold text-white">
+                        {filteredCounterUploads.find(l => l.counterId === selectedCounterId)?.counterName}
+                      </h3>
+                    </div>
+                    
+                    <div className="border border-[#222222] rounded-2xl overflow-hidden bg-[#0d0d0d] shadow-xl">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent border-b border-[#222222] bg-[#161616]">
+                            <TableHead>File</TableHead>
+                            <TableHead>Upload Date</TableHead>
+                            <TableHead className="text-center">Total Rows</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredCounterUploads
+                            .find(l => l.counterId === selectedCounterId)
+                            ?.uploads.slice().reverse().map((upload: any, i: number) => (
+                            <TableRow key={i} className="hover:bg-[#222222]/10 border-b border-[#222222]/50 transition-colors">
+                              <TableCell className="font-bold text-white">Excel {i + 1}</TableCell>
+                              <TableCell className="font-mono text-text-secondary">
+                                {upload.date} {upload.fileName !== 'Unknown File' ? `(${upload.fileName})` : ''}
+                              </TableCell>
+                              <TableCell className="text-center font-mono text-purple-400 font-bold">
+                                {upload.count} rows
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => onOpenBatchDetails({
+                                    counter_id: selectedCounterId,
+                                    counter_name: filteredCounterUploads.find(l => l.counterId === selectedCounterId)?.counterName,
+                                    date: upload.date,
+                                    source: 'counter'
+                                  })}
+                                  className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-4 font-bold rounded-xl text-xs h-8 transition-all"
+                                >
+                                  View Transactions
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {filteredCounterUploads.map((log) => {
+                      return (
+                        <motion.div
+                          key={log.counterId}
+                          onClick={() => setSelectedCounterId(log.counterId)}
+                          className="group relative p-6 rounded-2xl border bg-gradient-to-br from-[#161616] to-[#0d0d0d] border-[#222222] transition-all duration-300 shadow-xl overflow-hidden flex flex-col justify-between cursor-pointer hover:border-purple-500/50"
+                        >
+                          <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
 
-                        <div className="flex items-center gap-4">
-                          <div className="p-3 rounded-xl bg-purple-500/10 text-purple-400 transition-colors">
-                            <Users className="w-5 h-5" />
+                          <div className="flex items-center gap-4 mb-4">
+                            <div className="p-3 rounded-xl bg-purple-500/10 text-purple-400 transition-colors">
+                              <Users className="w-5 h-5" />
+                            </div>
+                            <div className="flex-grow min-w-0">
+                              <h4 className="text-sm font-bold text-white tracking-wide truncate" title={log.counterName}>
+                                {cleanCounterName(log.counterName)}
+                              </h4>
+                              <p className="text-[11px] text-text-secondary mt-0.5 font-semibold">
+                                {log.uploads.length} distinct upload dates
+                              </p>
+                            </div>
                           </div>
-                          <div className="flex-grow min-w-0">
-                            <h4 className="text-sm font-bold text-white tracking-wide group-hover:text-purple-300 transition-colors truncate" title={log.counterName}>
-                              {cleanCounterName(log.counterName)}
-                            </h4>
-                            <p className="text-[11px] text-text-secondary mt-0.5 font-semibold">
-                              {log.uploads.length} distinct upload dates
-                            </p>
-                          </div>
-                        </div>
 
-                        <div className="mt-6 pt-4 border-t border-[#222222]/80 flex justify-between items-center text-xs">
-                          <span className="text-text-secondary">Total Transactions:</span>
-                          <span className="font-mono text-purple-400 font-bold">{log.totalCount} rows</span>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
+                          <div className="pt-4 border-t border-[#222222]/80 flex justify-between items-center text-xs mt-auto mb-4">
+                            <span className="text-text-secondary">Total Transactions:</span>
+                            <span className="font-mono text-purple-400 font-bold">{log.totalCount} rows</span>
+                          </div>
+
+                          <div className="flex gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDownloadBatch('ALL', 'counter', log.counterId);
+                              }}
+                              className="flex-1 bg-emerald-600/10 text-emerald-400 hover:bg-emerald-600 hover:text-white rounded-xl h-9 font-bold transition-all"
+                            >
+                              <Download className="w-4 h-4 mr-2" />
+                              Download
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteBatch('ALL', 'counter', log.counterId);
+                              }}
+                              className="flex-1 bg-red-600/10 text-red-400 hover:bg-red-600 hover:text-white rounded-xl h-9 font-bold transition-all"
+                            >
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Delete
+                            </Button>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -416,7 +453,16 @@ export default function AdminBacklogTab({
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => onDeleteBatch(log.date, 'admin', null)}
+                            onClick={() => onDownloadBatch(log.date, 'admin', null, log.fileName)}
+                            className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 px-3 font-bold rounded-xl h-8 transition-all"
+                            title="Download Excel format"
+                          >
+                            <Download className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onDeleteBatch(log.date, 'admin', null, log.fileName)}
                             className="text-red-400 hover:text-red-300 hover:bg-red-500/10 px-3 font-bold rounded-xl h-8 transition-all"
                             title="Delete transactions for this day"
                           >

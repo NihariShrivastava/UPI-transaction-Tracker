@@ -105,7 +105,6 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [adminUploads, setAdminUploads] = useState<any[]>([]);
   const [backlogLoading, setBacklogLoading] = useState(false);
   const [backlogSubTab, setBacklogSubTab] = useState<'counter' | 'admin'>('counter');
-  const [selectedBacklogCounter, setSelectedBacklogCounter] = useState<any | null>(null);
 
   // Batch details modal state
   const [selectedDetailBatch, setSelectedDetailBatch] = useState<{
@@ -353,7 +352,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       while (keepFetching) {
         const { data, error } = await supabase
           .from('transactions')
-          .select('*, users(counter_name)')
+          .select('*, users(username, counter_name)')
           .range(from, from + step - 1);
 
         if (error) {
@@ -378,9 +377,12 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       const adminGroup: { [key: string]: any } = {};
 
       txs?.forEach((t: any) => {
+        const uploadDate = t.created_at ? t.created_at.split('T')[0] : t.date;
+        const fileName = t.file_name || 'Unknown File';
+
         if (t.source === 'counter' && t.counter_id) {
           const cId = t.counter_id;
-          const cName = t.users?.counter_name || `Counter ${cId}`;
+          const cName = t.users?.username || t.users?.counter_name || `Counter ${cId}`;
           
           if (!counterMap[cId]) {
             counterMap[cId] = {
@@ -393,19 +395,18 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           
           counterMap[cId].totalCount++;
           
-          // Add to uploads date AND file_name
-          const fileName = t.file_name || 'Unknown File';
-          let dateUpload = counterMap[cId].uploads.find(u => u.date === t.date && u.fileName === fileName);
+          let dateUpload = counterMap[cId].uploads.find(u => u.date === uploadDate && u.fileName === fileName);
           if (!dateUpload) {
-            dateUpload = { date: t.date, fileName: fileName, count: 0 };
+            dateUpload = { date: uploadDate, fileName: fileName, count: 0 };
             counterMap[cId].uploads.push(dateUpload);
           }
           dateUpload.count++;
         } else if (t.source === 'admin') {
-          const key = t.date;
+          const key = `${uploadDate}_${fileName}`;
           if (!adminGroup[key]) {
             adminGroup[key] = {
-              date: t.date,
+              date: uploadDate,
+              fileName: fileName,
               count: 0
             };
           }
@@ -892,7 +893,8 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             date: dateStr,
             amount: amountNum,
             source: 'admin',
-            counter_id: null
+            counter_id: null,
+            file_name: file.name
           });
 
           uniqueDates.add(dateStr);
@@ -1037,33 +1039,152 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     }
   };
 
-  // Delete a specific batch of transactions for a particular day
-  const handleDeleteBatch = async (date: string, source: 'counter' | 'admin', counter_id: number | null, file_name?: string) => {
-    if (!window.confirm(`⚠️ Are you sure you want to delete all ${source} transactions for ${date}? This will also clear discrepancy reports for this date.`)) return;
+  // Download specific batch
+  const handleDownloadBatch = async (date: string, source: 'counter' | 'admin', counter_id: number | null, file_name?: string) => {
+    try {
+      setBacklogLoading(true);
+      let query = supabase.from('transactions').select('*, users(username, counter_name)').eq('source', source);
+      if (source === 'counter' && counter_id) query = query.eq('counter_id', counter_id);
+      
+      if (file_name && file_name !== 'Unknown File') {
+        query = query.eq('file_name', file_name);
+      } else if (date !== 'ALL') {
+        query = query.eq('date', date);
+      }
+
+      const { data, error } = await query;
+      if (error) throw new Error(error.message);
+      if (!data || data.length === 0) {
+        alert("No data found for this batch.");
+        return;
+      }
+
+      const exportData = data.map(t => ({
+        'Transaction ID / UTR': t.upi_id,
+        'Amount': t.amount,
+        'Date': t.date,
+        'Counter Name': t.users?.username || t.users?.counter_name || 'Admin',
+        'Upload Date': t.created_at
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Transactions");
+      
+      const fileName = `${source}_transactions_${date === 'ALL' ? 'all' : date}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+
+    } catch (err: any) {
+      alert("Download error: " + err.message);
+    } finally {
+      setBacklogLoading(false);
+    }
+  };
+
+  // Download full backlog
+  const handleDownloadFullBacklog = async (source: 'counter' | 'admin') => {
     try {
       setBacklogLoading(true);
       
-      let txQuery = supabase.from('transactions').delete().eq('date', date).eq('source', source);
+      let allData: any[] = [];
+      let from = 0;
+      const step = 1000;
+      let keepFetching = true;
+
+      while (keepFetching) {
+        const { data, error } = await supabase
+          .from('transactions')
+          .select('*, users(username, counter_name)')
+          .eq('source', source)
+          .range(from, from + step - 1);
+
+        if (error) throw new Error(error.message);
+        if (data && data.length > 0) {
+          allData = [...allData, ...data];
+          from += step;
+          if (data.length < step) keepFetching = false;
+        } else {
+          keepFetching = false;
+        }
+      }
+
+      if (allData.length === 0) {
+        alert("No data found.");
+        return;
+      }
+
+      const exportData = allData.map(t => ({
+        'Transaction ID / UTR': t.upi_id,
+        'Amount': t.amount,
+        'Date': t.date,
+        'Counter Name': t.users?.username || t.users?.counter_name || 'Admin',
+        'Upload Date': t.created_at
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, `${source} Backlog`);
+      
+      XLSX.writeFile(wb, `${source}_full_backlog.xlsx`);
+
+    } catch (err: any) {
+      alert("Download error: " + err.message);
+    } finally {
+      setBacklogLoading(false);
+    }
+  };
+
+  // Delete a specific batch of transactions for a particular day
+  const handleDeleteBatch = async (date: string, source: 'counter' | 'admin', counter_id: number | null, file_name?: string) => {
+    if (!window.confirm(`⚠️ Are you sure you want to delete this Excel file? This will also clear discrepancy reports for its dates.`)) return;
+    try {
+      setBacklogLoading(true);
+      
+      let txQuery = supabase.from('transactions').delete().eq('source', source);
       if (source === 'counter' && counter_id) {
         txQuery = txQuery.eq('counter_id', counter_id);
       }
-      if (file_name) {
+      
+      let affectedDates: string[] = [];
+
+      if (file_name && file_name !== 'Unknown File') {
+        // Fetch affected dates before deleting
+        let fetchQuery = supabase.from('transactions').select('date').eq('source', source).eq('file_name', file_name);
+        if (source === 'counter' && counter_id) fetchQuery = fetchQuery.eq('counter_id', counter_id);
+        
+        const { data: fetchTxs } = await fetchQuery;
+        if (fetchTxs) {
+          affectedDates = Array.from(new Set(fetchTxs.map((t: any) => t.date)));
+        }
         txQuery = txQuery.eq('file_name', file_name);
+      } else if (date === 'ALL') {
+        // Delete ALL for this counter
+        let fetchQuery = supabase.from('transactions').select('date').eq('source', source);
+        if (source === 'counter' && counter_id) fetchQuery = fetchQuery.eq('counter_id', counter_id);
+        const { data: fetchTxs } = await fetchQuery;
+        if (fetchTxs) {
+          affectedDates = Array.from(new Set(fetchTxs.map((t: any) => t.date)));
+        }
+      } else {
+        affectedDates = [date];
+        txQuery = txQuery.eq('date', date);
       }
       
       const { error: txError } = await txQuery;
       if (txError) throw new Error(`Failed to delete transactions: ${txError.message}`);
       
-      const { error: reportsError } = await supabase.from('reports').delete().eq('date', date);
-      if (reportsError) throw new Error(`Failed to delete related reports: ${reportsError.message}`);
-      
-      // Regenerate reports for this date since we deleted some transactions
-      await compareTransactionsForDates([date]);
+      if (affectedDates.length > 0) {
+        const { error: reportsError } = await supabase.from('reports').delete().in('date', affectedDates);
+        if (reportsError) throw new Error(`Failed to delete related reports: ${reportsError.message}`);
+        
+        // Regenerate reports for these dates since we deleted some transactions
+        await compareTransactionsForDates(affectedDates);
+      }
 
-      alert(`🎉 Successfully deleted ${source} data for ${date}.`);
+      alert(`🎉 Successfully deleted ${source} data.`);
       
       // If the currently viewed batch details match, close the modal
-      if (selectedDetailBatch?.date === date && selectedDetailBatch?.source === source && selectedDetailBatch?.counter_id === counter_id) {
+      if (selectedDetailBatch?.source === source && selectedDetailBatch?.counter_id === counter_id) {
         setSelectedDetailBatch(null);
       }
       
@@ -1510,9 +1631,9 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             onWipeAdminBacklog={handleWipeAdminBacklog}
             onWipeCounterBacklog={handleWipeCounterBacklog}
             onDeleteBatch={handleDeleteBatch}
+            onDownloadBatch={handleDownloadBatch}
+            onDownloadFullBacklog={handleDownloadFullBacklog}
             onOpenBatchDetails={setSelectedDetailBatch}
-            selectedBacklogCounter={selectedBacklogCounter}
-            setSelectedBacklogCounter={setSelectedBacklogCounter}
             onRefreshLogs={fetchBacklogHistory}
           />
         )}
