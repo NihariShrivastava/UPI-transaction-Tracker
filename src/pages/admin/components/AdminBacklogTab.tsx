@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Archive, RefreshCw, Trash2, Users, Loader2 } from 'lucide-react';
+import { Archive, RefreshCw, Trash2, Users, Loader2, ChevronLeft } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '../../../components/ui/Table';
 import { Card, CardHeader, CardTitle, CardContent } from '../../../components/ui/Card';
@@ -19,6 +19,7 @@ interface AdminBacklogTabProps {
   onWipeCounterBacklog: () => void;
   onDeleteBatch: (date: string, source: 'counter' | 'admin', counter_id: number | null) => void;
   onOpenBatchDetails: (batch: any) => void;
+  selectedBacklogCounter: any;
   setSelectedBacklogCounter: (counter: any) => void;
   onRefreshLogs: () => void;
 }
@@ -37,6 +38,7 @@ export default function AdminBacklogTab({
   onWipeCounterBacklog,
   onDeleteBatch,
   onOpenBatchDetails,
+  selectedBacklogCounter,
   setSelectedBacklogCounter,
   onRefreshLogs
 }: AdminBacklogTabProps) {
@@ -85,6 +87,14 @@ export default function AdminBacklogTab({
     .filter(log => log.uploads.length > 0);
 
   const filteredAdminUploads = adminUploads.filter(log => isDateInRange(log.date));
+
+
+  const cleanCounterName = (name: string) => {
+    if (!name) return 'Unknown';
+    // Remove "PHONE PE ID" and any trailing IDs if they exist
+    return name.replace(/PHONE\s*PE\s*ID.*/i, '').trim() || name;
+  };
+
 
   return (
     <Card className="bg-[#111111] border-[#222222] animate-in fade-in slide-in-from-bottom-4 rounded-2xl shadow-xl overflow-hidden">
@@ -227,7 +237,82 @@ export default function AdminBacklogTab({
           </div>
         ) : backlogSubTab === 'counter' ? (
           <div>
-            {filteredCounterUploads.length === 0 ? (
+            {selectedBacklogCounter ? (
+              <div className="animate-in fade-in slide-in-from-right-4">
+                <div className="flex items-center gap-4 mb-6">
+                  <Button variant="ghost" onClick={() => setSelectedBacklogCounter(null)} className="text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 rounded-xl px-4 py-2">
+                    <ChevronLeft className="w-5 h-5 mr-1" /> Back to Counters
+                  </Button>
+                  <h3 className="text-xl font-bold text-white">{cleanCounterName(selectedBacklogCounter.counterName)} Uploads</h3>
+                </div>
+                
+                <div className="border border-[#222222] rounded-2xl overflow-hidden bg-[#0d0d0d] shadow-xl">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent border-b border-[#222222] bg-[#161616]">
+                        <TableHead>Upload Name</TableHead>
+                        <TableHead>Upload Date</TableHead>
+                        <TableHead className="text-center">Total Transaction Records</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {selectedBacklogCounter.uploads.map((upload: any, idx: number) => (
+                        <TableRow key={`${upload.date}_${idx}`} className="hover:bg-[#222222]/10 border-b border-[#222222]/50 transition-colors">
+                          <TableCell className="font-semibold text-white">
+                            <span 
+                              onClick={() => onOpenBatchDetails({
+                                counter_id: selectedBacklogCounter.counterId,
+                                counter_name: selectedBacklogCounter.counterName,
+                                date: upload.date,
+                                source: 'counter'
+                              })}
+                              className="cursor-pointer underline text-purple-400 hover:text-purple-300 font-bold transition-colors"
+                            >
+                              Excel {idx + 1}
+                            </span>
+                          </TableCell>
+                          <TableCell className="font-mono text-text-secondary">{upload.date}</TableCell>
+                          <TableCell className="text-center font-mono text-purple-400 font-bold">{upload.count} rows</TableCell>
+                          <TableCell>
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              Completed
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => onOpenBatchDetails({
+                                  counter_id: selectedBacklogCounter.counterId,
+                                  counter_name: selectedBacklogCounter.counterName,
+                                  date: upload.date,
+                                  source: 'counter'
+                                })}
+                                className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-4 font-bold rounded-xl text-xs h-8 transition-all"
+                              >
+                                View Transactions
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => onDeleteBatch(upload.date, 'counter', selectedBacklogCounter.counterId)}
+                                className="text-red-400 hover:text-red-300 hover:bg-red-500/10 px-3 font-bold rounded-xl h-8 transition-all"
+                                title="Delete transactions for this day"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            ) : filteredCounterUploads.length === 0 ? (
               <div className="text-center py-16 text-text-secondary">
                 No counter transaction uploads found matching active filters.
               </div>
@@ -240,12 +325,7 @@ export default function AdminBacklogTab({
                       <motion.div
                         key={log.counterId}
                         whileHover={{ y: -4, scale: 1.02 }}
-                        onClick={() => onOpenBatchDetails({
-                          counter_id: log.counterId,
-                          counter_name: log.counterName,
-                          date: 'ALL',
-                          source: 'counter'
-                        })}
+                        onClick={() => setSelectedBacklogCounter(log)}
                         className="group relative p-6 rounded-2xl border bg-gradient-to-br from-[#161616] to-[#0d0d0d] border-[#222222] hover:border-purple-500/30 transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between"
                       >
                         <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
@@ -256,7 +336,7 @@ export default function AdminBacklogTab({
                           </div>
                           <div className="flex-grow min-w-0">
                             <h4 className="text-sm font-bold text-white tracking-wide group-hover:text-purple-300 transition-colors truncate" title={log.counterName}>
-                              {log.counterName}
+                              {cleanCounterName(log.counterName)}
                             </h4>
                             <p className="text-[11px] text-text-secondary mt-0.5 font-semibold">
                               {log.uploads.length} distinct upload dates

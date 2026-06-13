@@ -47,7 +47,6 @@ export default function AdminReportsTab({
   const reportsDateInputRef = useRef<HTMLInputElement>(null);
   const [tempFilterDate, setTempFilterDate] = useState(reportsFilterDate);
   const [editingReportId, setEditingReportId] = useState<number | null>(null);
-  const [selectedCounterForStores, setSelectedCounterForStores] = useState<any | null>(null);
   const [selectedCounterFilter, setSelectedCounterFilter] = useState<string[]>([]);
   const [isCounterFilterOpen, setIsCounterFilterOpen] = useState(false);
   const [selectedStoreFilter, setSelectedStoreFilter] = useState<string[]>([]);
@@ -68,44 +67,16 @@ export default function AdminReportsTab({
     return groupedReportsByCounter.map(g => {
       const isCounterMatch = String(g.username || '').toLowerCase().includes(lower);
       
-      const newStoreGroups: any = {};
-      let newTotalAmount = 0;
-      let newReports: any[] = [];
-
-      if (g.storeGroups) {
-        Object.entries(g.storeGroups).forEach(([storeId, storeGroup]: [string, any]) => {
-          const isStoreMatch = String(storeId || '').toLowerCase().includes(lower);
-          
-          const filteredStoreReports = storeGroup.reports.filter((r: any) => 
-            isCounterMatch || isStoreMatch ||
-            String(r.upi_id || '').toLowerCase().includes(lower) || 
-            String(r.amount || '').includes(lower)
-          );
-
-          if (filteredStoreReports.length > 0) {
-            const storeTotal = filteredStoreReports.reduce((sum: number, r: any) => sum + Number(r.amount), 0);
-            newStoreGroups[storeId] = {
-              ...storeGroup,
-              reports: filteredStoreReports,
-              totalAmount: storeTotal
-            };
-            newTotalAmount += storeTotal;
-            newReports = [...newReports, ...filteredStoreReports];
-          }
-        });
-      } else {
-        newReports = g.reports.filter((r: any) => 
-          isCounterMatch ||
-          String(r.upi_id || '').toLowerCase().includes(lower) || 
-          String(r.amount || '').includes(lower)
-        );
-        newTotalAmount = newReports.reduce((sum: number, r: any) => sum + Number(r.amount), 0);
-      }
+      const newReports = g.reports.filter((r: any) => 
+        isCounterMatch ||
+        String(r.upi_id || '').toLowerCase().includes(lower) || 
+        String(r.amount || '').includes(lower)
+      );
+      const newTotalAmount = newReports.reduce((sum: number, r: any) => sum + Number(r.amount), 0);
 
       return { 
         ...g, 
         reports: newReports,
-        storeGroups: Object.keys(newStoreGroups).length > 0 ? newStoreGroups : g.storeGroups,
         totalAmount: newTotalAmount
       };
     }).filter(g => g.reports.length > 0);
@@ -131,13 +102,11 @@ export default function AdminReportsTab({
 
   const handleNextSlide = () => {
     nextSlide();
-    setSelectedCounterForStores(null);
-  };
+    };
 
   const handlePrevSlide = () => {
     prevSlide();
-    setSelectedCounterForStores(null);
-  };
+    };
 
   const handleApplyDate = () => {
     setReportsFilterDate(tempFilterDate);
@@ -146,7 +115,6 @@ export default function AdminReportsTab({
   const handleClearDate = () => {
     setTempFilterDate('');
     setReportsFilterDate('');
-    setSelectedCounterForStores(null);
     setSelectedCounterFilter([]);
     setIsCounterFilterOpen(false);
     setSelectedStoreFilter([]);
@@ -206,6 +174,22 @@ export default function AdminReportsTab({
           'Details': r.details?.message || ''
         });
       });
+    } else if (currentSlide === 3) {
+      filename = 'Mismatched_Amount_Report.xlsx';
+      filteredGroupedReportsByCounter
+        .filter(g => selectedCounterFilter.length === 0 || selectedCounterFilter.includes(g.username))
+        .forEach((group: any) => {
+          group.reports.forEach((r: any) => {
+            exportData.push({
+              'Counter Name': group.counterName,
+              'UPI ID / Cheque No': r.upi_id,
+              'Amount': r.amount,
+              'Date': r.date || reportsFilterDate || new Date().toISOString().split('T')[0],
+              'Type': 'Mismatched Amount',
+              'Details': r.details?.message || ''
+            });
+          });
+        });
     }
 
     if (exportData.length === 0) {
@@ -263,6 +247,16 @@ export default function AdminReportsTab({
     return Array.from(new Set(groupedMissingInCounter.map((g: any) => g.storeName))).filter(Boolean);
   }, [groupedMissingInCounter]);
 
+  const overviewSlide3 = useMemo(() => {
+    if (currentSlide !== 3) return [];
+    return groupedReportsByCounter.map(g => ({
+      name: g.username,
+      uploaded: uploadMetrics?.byCounter[g.username] || 0,
+      discrepancies: g.reports.length,
+      matched: g.reports.filter((r: any) => r.details?.is_edited && !r.details?.is_failed_match).length
+    }));
+  }, [groupedReportsByCounter, currentSlide, uploadMetrics]);
+
   const overviewSlide0 = useMemo(() => {
     if (currentSlide !== 0) return [];
     return groupedReportsByCounter.map(g => ({
@@ -307,7 +301,7 @@ export default function AdminReportsTab({
     return Object.values(groups);
   }, [reportsData, currentSlide, uploadMetrics]);
 
-  const currentOverviewData = currentSlide === 0 ? overviewSlide0 : currentSlide === 1 ? overviewSlide1 : overviewSlide2;
+  const currentOverviewData = currentSlide === 0 ? overviewSlide0 : currentSlide === 1 ? overviewSlide1 : currentSlide === 2 ? overviewSlide2 : overviewSlide3;
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
@@ -425,7 +419,7 @@ export default function AdminReportsTab({
               </Button>
             )}
 
-            {currentSlide === 0 && uniqueCountersForFilter.length > 0 && (
+            {(currentSlide === 0 || currentSlide === 3) && uniqueCountersForFilter.length > 0 && (
               <div className="relative ml-2 z-50">
                 <Button 
                   onClick={() => setIsCounterFilterOpen(!isCounterFilterOpen)}
@@ -621,108 +615,53 @@ export default function AdminReportsTab({
                 </span>
               </div>
             )}
-            {currentSlide === 0 ? (
+            {(currentSlide === 0 || currentSlide === 3) ? (
               /* Slide 0: Missing in Admin (Grouped by Counter Cards) */
-              (() => {
-                const activeCounter = selectedCounterForStores 
-                  ? (filteredGroupedReportsByCounter.find(g => g.counterId === selectedCounterForStores.counterId) || selectedCounterForStores)
-                  : null;
-
-                return activeCounter ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
+                {filteredGroupedReportsByCounter
+                .filter(g => selectedCounterFilter.length === 0 || selectedCounterFilter.includes(g.username))
+                .map((group, idx) => (
+                <motion.div
+                  key={`${group.counterId || 'unknown'}_${idx}`}
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  whileHover={{ y: -6, scale: 1.02 }}
+                  onClick={() => onOpenGroupDetails({
+                    counterId: group.counterId,
+                    counterName: group.username,
+                    reports: group.reports,
+                    totalAmount: group.totalAmount
+                  })}
+                  className="group relative bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] hover:border-purple-500/40 p-6 rounded-2xl transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
                   <div>
-                    <div className="flex items-center gap-4 mb-6 animate-in fade-in slide-in-from-left-4">
-                      <Button variant="ghost" onClick={() => setSelectedCounterForStores(null)} className="text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 rounded-xl px-4 py-2">
-                        <ChevronLeft className="w-5 h-5 mr-1" /> Back to Counters
-                      </Button>
-                      <h3 className="text-xl font-bold text-white">Store IDs for {activeCounter.username}</h3>
+                    <div className="flex items-center justify-between mb-4">
+                      <span className="inline-flex items-center justify-center p-2.5 rounded-xl bg-purple-500/10 text-purple-400">
+                        <Users className="w-5 h-5" />
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
+                        Unmatched
+                      </span>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
-                      {Object.values(activeCounter.storeGroups || {}).map((storeGroup: any, idx: number) => (
-                        <motion.div
-                          key={`store_${idx}`}
-                          initial={{ opacity: 0, y: 15 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          whileHover={{ y: -6, scale: 1.02 }}
-                          onClick={() => onOpenGroupDetails({
-                            counterId: activeCounter.counterId,
-                            counterName: storeGroup.storeId,
-                            reports: storeGroup.reports,
-                            totalAmount: storeGroup.totalAmount
-                          })}
-                          className="group relative bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] hover:border-purple-500/40 p-6 rounded-2xl transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between"
-                        >
-                          <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-                          <div>
-                            <div className="flex items-center justify-between mb-4">
-                              <span className="inline-flex items-center justify-center p-2.5 rounded-xl bg-purple-500/10 text-purple-400">
-                                <Users className="w-5 h-5" />
-                              </span>
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
-                                Store ID
-                              </span>
-                            </div>
-                            <h4 className="text-lg font-bold text-white group-hover:text-purple-300 transition-colors line-clamp-2">
-                              {storeGroup.storeId}
-                            </h4>
-                            <p className="text-xs text-text-secondary mt-2">
-                              Discrepancy: <span className="text-white font-bold">{storeGroup.reports.length} items</span> completely missing in Admin spreadsheet.
-                            </p>
-                          </div>
-                          <div className="mt-6 pt-4 border-t border-[#222222]/80 flex items-center justify-between">
-                            <span className="text-sm font-mono text-purple-400 font-bold">
-                              ₹{storeGroup.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </span>
-                            <span className="text-xs text-purple-400 group-hover:underline font-bold transition-all flex items-center gap-1">
-                              Inspect details <span>→</span>
-                            </span>
-                          </div>
-                        </motion.div>
-                      ))}
-                    </div>
+                    <h4 className="text-lg font-bold text-white group-hover:text-purple-300 transition-colors">
+                      {group.username}
+                    </h4>
+                    <p className="text-xs text-text-secondary mt-1">
+                      Discrepancy: <span className="text-white font-bold">{group.reports.length} items</span> {currentSlide === 3 ? 'with mismatched amounts.' : 'completely missing in Admin spreadsheet.'}
+                    </p>
                   </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
-                    {filteredGroupedReportsByCounter
-                    .filter(g => selectedCounterFilter.length === 0 || selectedCounterFilter.includes(g.username))
-                    .map((group, idx) => (
-                    <motion.div
-                      key={`${group.counterId || 'unknown'}_${idx}`}
-                      initial={{ opacity: 0, y: 15 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      whileHover={{ y: -6, scale: 1.02 }}
-                      onClick={() => setSelectedCounterForStores(group)}
-                      className="group relative bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] hover:border-purple-500/40 p-6 rounded-2xl transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between"
-                    >
-                      <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-                      <div>
-                        <div className="flex items-center justify-between mb-4">
-                          <span className="inline-flex items-center justify-center p-2.5 rounded-xl bg-purple-500/10 text-purple-400">
-                            <Users className="w-5 h-5" />
-                          </span>
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
-                            Unmatched
-                          </span>
-                        </div>
-                        <h4 className="text-lg font-bold text-white group-hover:text-purple-300 transition-colors">
-                          {group.username}
-                        </h4>
-                        <p className="text-xs text-text-secondary mt-1">
-                          Discrepancy: <span className="text-white font-bold">{group.reports.length} items</span> completely missing in Admin spreadsheet.
-                        </p>
-                      </div>
-                      <div className="mt-6 pt-4 border-t border-[#222222]/80 flex items-center justify-between">
-                        <span className="text-sm font-mono text-purple-400 font-bold">
-                          ₹{group.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </span>
-                        <span className="text-xs text-purple-400 group-hover:underline font-bold transition-all flex items-center gap-1">
-                          View Store IDs <span>→</span>
-                        </span>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-                );
-              })()
+                  <div className="mt-6 pt-4 border-t border-[#222222]/80 flex items-center justify-between">
+                    <span className="text-sm font-mono text-purple-400 font-bold">
+                      ₹{group.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    </span>
+                    <span className="text-xs text-purple-400 group-hover:underline font-bold transition-all flex items-center gap-1">
+                      Inspect details <span>→</span>
+                    </span>
+                  </div>
+                </motion.div>
+              ))}
+              </div>
             ) : (
               /* Slide 1 & 2: Render individual cards */
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">

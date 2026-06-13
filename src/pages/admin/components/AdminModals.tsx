@@ -216,7 +216,7 @@ export function ReportGroupDetailsModal({
                     <TableRow className="hover:bg-transparent border-b border-[#222222] bg-[#161616]">
                       <TableHead className="w-[80px]">#</TableHead>
                       <TableHead>Cheque Number / UTR</TableHead>
-                      <TableHead>Mismatched Amount</TableHead>
+                      <TableHead>Amount</TableHead>
                       <TableHead>Admin Remark</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>

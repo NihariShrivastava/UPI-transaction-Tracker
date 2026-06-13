@@ -153,9 +153,11 @@ export default function CounterDiscrepancyLog({
                     <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
                       report.type === 'missing_in_admin'
                         ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                        : report.type === 'mismatched_amount'
+                        ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
                         : 'bg-orange-500/10 text-orange-400 border border-orange-500/20'
                     }`}>
-                      {report.type === 'missing_in_admin' ? 'Missing UTR' : 'Duplicate'}
+                      {report.type === 'missing_in_admin' ? 'Missing UTR' : report.type === 'mismatched_amount' ? 'Amount Error' : 'Duplicate'}
                     </span>
                   </div>
                   <div className="space-y-1">

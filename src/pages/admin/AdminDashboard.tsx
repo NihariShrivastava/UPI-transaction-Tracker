@@ -86,7 +86,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
   // Slider State
   const [currentSlide, setCurrentSlide] = useState(0);
-  const slides = ['Missing in Admin', 'Missing in Counter', 'Duplicate UPI IDs'];
+  const slides = ['Missing in Admin', 'Missing in Counter', 'Duplicate Entries', 'Mismatched Amount'];
 
   // Live Excel Upload State (Admin)
   const adminFileInputRef = useRef<HTMLInputElement>(null);
@@ -105,6 +105,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [adminUploads, setAdminUploads] = useState<any[]>([]);
   const [backlogLoading, setBacklogLoading] = useState(false);
   const [backlogSubTab, setBacklogSubTab] = useState<'counter' | 'admin'>('counter');
+  const [selectedBacklogCounter, setSelectedBacklogCounter] = useState<any | null>(null);
 
   // Batch details modal state
   const [selectedDetailBatch, setSelectedDetailBatch] = useState<{
@@ -143,14 +144,13 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
   // Group reportsData by Counter dynamically for Slide 0
   const groupedReportsByCounter = useMemo(() => {
-    if (currentSlide !== 0) return [];
+    if (currentSlide !== 0 && currentSlide !== 3) return [];
     
-    const groups: { [key: string]: { counterId: number | null; username: string; counterName: string; storeGroups: { [key: string]: { storeId: string; reports: any[]; totalAmount: number } }; reports: any[]; totalAmount: number } } = {};
+    const groups: { [key: string]: { counterId: number | null; username: string; counterName: string; reports: any[]; totalAmount: number } } = {};
     
     reportsData.forEach(r => {
       const cId = r.counter_id;
       const username = r.users?.username || `Counter ${cId || 'Unknown'}`;
-      const storeId = r.details?.counter_name || r.users?.counter_name || 'Unknown Store ID';
       const key = cId ? String(cId) : 'unknown';
       
       if (!groups[key]) {
@@ -158,22 +158,10 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           counterId: cId,
           username: username,
           counterName: username,
-          storeGroups: {},
           reports: [],
           totalAmount: 0
         };
       }
-      
-      if (!groups[key].storeGroups[storeId]) {
-        groups[key].storeGroups[storeId] = {
-          storeId: storeId,
-          reports: [],
-          totalAmount: 0
-        };
-      }
-      
-      groups[key].storeGroups[storeId].reports.push(r);
-      groups[key].storeGroups[storeId].totalAmount += Number(r.amount);
       
       groups[key].reports.push(r);
       groups[key].totalAmount += Number(r.amount);
@@ -259,7 +247,9 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         ? 'missing_in_admin' 
         : currentSlide === 1 
         ? 'missing_in_counter' 
-        : 'duplicate_upi';
+        : currentSlide === 2
+        ? 'duplicate_upi'
+        : 'mismatched_amount';
 
       let query = supabase
         .from('reports')
@@ -384,7 +374,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       }
 
       // Group by Counter ID first
-      const counterMap: { [key: number]: { counterId: number; counterName: string; uploads: { date: string; count: number }[]; totalCount: number } } = {};
+      const counterMap: { [key: number]: { counterId: number; counterName: string; uploads: { date: string; fileName?: string; count: number }[]; totalCount: number } } = {};
       const adminGroup: { [key: string]: any } = {};
 
       txs?.forEach((t: any) => {
@@ -403,10 +393,11 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           
           counterMap[cId].totalCount++;
           
-          // Add to uploads date
-          let dateUpload = counterMap[cId].uploads.find(u => u.date === t.date);
+          // Add to uploads date AND file_name
+          const fileName = t.file_name || 'Unknown File';
+          let dateUpload = counterMap[cId].uploads.find(u => u.date === t.date && u.fileName === fileName);
           if (!dateUpload) {
-            dateUpload = { date: t.date, count: 0 };
+            dateUpload = { date: t.date, fileName: fileName, count: 0 };
             counterMap[cId].uploads.push(dateUpload);
           }
           dateUpload.count++;
@@ -546,43 +537,30 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
         const reportsToInsert: any[] = [];
 
-        // Group counter transactions by exact normalized Cheque No
+                        // Group counter transactions by exact normalized Cheque No
         const counterMap = new Map<string, any[]>();
-        const counterLast10Map = new Map<string, any[]>();
         counterTxsWindow.forEach(t => {
-          const keys = String(t.upi_id).split(',');
-          keys.forEach(rawKey => {
-            let key = rawKey.trim().toLowerCase();
-            if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
-            if (!counterMap.has(key)) counterMap.set(key, []);
-            counterMap.get(key)!.push(t);
-            
-            if (key.length >= 10) {
-              const last10 = key.slice(-10);
-              if (!counterLast10Map.has(last10)) counterLast10Map.set(last10, []);
-              counterLast10Map.get(last10)!.push(t);
-            }
-          });
+          let key = String(t.upi_id).trim().toLowerCase();
+          if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
+          if (!counterMap.has(key)) counterMap.set(key, []);
+          counterMap.get(key)!.push(t);
         });
 
-        // Group admin transactions by exact UTR and last 10 digits
-        const adminExactMap = new Map<string, any[]>();
-        const adminLast10Map = new Map<string, any[]>();
+        // Group admin transactions by UTR
+        const adminUtrMap = new Map<string, any[]>();
+        
         adminTxsWindow.forEach(t => {
-          const keys = String(t.upi_id).split(',');
-          keys.forEach(rawKey => {
-            let key = rawKey.trim().toLowerCase();
-            if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
-            
-            if (!adminExactMap.has(key)) adminExactMap.set(key, []);
-            adminExactMap.get(key)!.push(t);
-            
-            if (key.length >= 10) {
-              const last10 = key.slice(-10);
-              if (!adminLast10Map.has(last10)) adminLast10Map.set(last10, []);
-              adminLast10Map.get(last10)!.push(t);
-            }
-          });
+          const rawUpiId = String(t.upi_id).split('|||')[0];
+          // Since we removed PhonePe, there's no comma anymore for new uploads,
+          // but for backward compatibility with existing data, we take the first part
+          const parts = rawUpiId.split(',');
+          
+          let utr = parts[0]?.trim().toLowerCase() || '';
+          
+          if (utr) {
+            if (!adminUtrMap.has(utr)) adminUtrMap.set(utr, []);
+            adminUtrMap.get(utr)!.push(t);
+          }
         });
 
         // Check duplicate Cheque Numbers in Counter sheets
@@ -591,7 +569,6 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           if (targetList.length > 0 && list.length > 1) {
             // Push one report per target transaction
             targetList.forEach(t => {
-              // Ensure we don't push the exact same report twice if a transaction has multiple identifiers
               if (!reportsToInsert.find(r => r.type === 'duplicate_upi' && r.upi_id === t.upi_id && r.source_id === t.id)) {
                 reportsToInsert.push({
                   date,
@@ -612,22 +589,22 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         }
 
         // Check duplicate Transaction UTRs in Admin sheets
-        for (const [, list] of adminExactMap.entries()) {
+        for (const [utr, list] of adminUtrMap.entries()) {
           const targetList = list.filter(t => t.date === date);
           if (targetList.length > 0 && list.length > 1) {
             targetList.forEach(t => {
-              if (!reportsToInsert.find(r => r.type === 'duplicate_upi' && r.upi_id === t.upi_id && r.source_id === t.id)) {
+              if (!reportsToInsert.find(r => r.type === 'duplicate_upi' && r.upi_id === utr && r.source_id === t.id)) {
                 reportsToInsert.push({
                   date,
                   type: 'duplicate_upi',
-                  upi_id: t.upi_id,
+                  upi_id: utr,
                   amount: t.amount,
                   counter_id: null,
                   source_id: t.id,
                   details: {
                     source: 'admin',
                     count: list.length,
-                    message: `Duplicate Transaction UTR '${t.upi_id}' loaded in Admin sheet (${list.length} records)`
+                    message: `Duplicate Transaction UTR '${utr}' loaded in Admin sheet (${list.length} records)`
                   }
                 });
               }
@@ -635,26 +612,24 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           }
         }
 
-        // strict validation: missing in admin or amount discrepancies
-        targetCounterTxs.forEach(c => {
-          const keys = String(c.upi_id).split(',').map(k => {
-            let key = k.trim().toLowerCase();
-            if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
-            return key;
-          });
-
-          let matchedAdminList: any[] | undefined = undefined;
-
-          for (const cKey of keys) {
-            let aList = adminExactMap.get(cKey);
-            if (!aList && cKey.length >= 10) {
-              aList = adminLast10Map.get(cKey.slice(-10));
-            }
-            if (aList) {
-              matchedAdminList = aList;
-              break;
+        // Helper to find a match where cheque is searched inside UTR
+        const findMatch = (cKey: string) => {
+          // Iterate over all admin UTRs and see if the admin UTR includes the cheque number
+          for (const [adminUtr, list] of adminUtrMap.entries()) {
+            if (adminUtr.includes(cKey)) {
+              return list;
             }
           }
+          return undefined;
+        };
+
+        // strict validation: missing in admin or amount discrepancies
+        targetCounterTxs.forEach(c => {
+          let cKey = String(c.upi_id).trim().toLowerCase();
+          if (cKey.endsWith('.0')) cKey = cKey.substring(0, cKey.length - 2);
+
+          // Find match by searching cheque number inside admin UTRs
+          let matchedAdminList = findMatch(cKey);
 
           if (!matchedAdminList) {
             // Missing in Admin completely
@@ -677,7 +652,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             if (!matchingAdmin) {
               reportsToInsert.push({
                 date,
-                type: 'missing_in_admin',
+                type: 'mismatched_amount',
                 upi_id: c.upi_id,
                 amount: c.amount,
                 counter_id: c.counter_id,
@@ -685,7 +660,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                   counter_name: c.users?.counter_name || 'Unknown',
                   cheque_amount: c.amount,
                   admin_amounts: matchedAdminList.map(a => a.amount),
-                  message: `Cheque Number '${c.upi_id}' matched keys, but amount verification failed! Counter receipt: ${c.amount}, Admin UPI Amount: ${matchedAdminList.map(a => a.amount).join(', ')}`
+                  message: `Cheque Number '${c.upi_id}' matched an Admin UTR, but amount verification failed! Counter receipt: ${c.amount}, Admin UPI Amount: ${matchedAdminList.map(a => a.amount).join(', ')}`
                 }
               });
             }
@@ -695,40 +670,37 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         // strict validation: missing in counter
         targetAdminTxs.forEach(a => {
           const rawUpiId = String(a.upi_id).split('|||')[0].trim();
-          const keys = rawUpiId.split(',').map(k => {
-            let key = k.trim().toLowerCase();
-            if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
-            return key;
-          });
+          const parts = rawUpiId.split(',');
+          
+          let utr = parts[0]?.trim().toLowerCase() || '';
 
-          let matchedCounterList: any[] | undefined = undefined;
+          let matchedCounterList = undefined;
 
-          for (const aKey of keys) {
-            let cList = counterMap.get(aKey);
-            if (!cList && aKey.length >= 10) {
-              cList = counterLast10Map.get(aKey.slice(-10));
-            }
-            if (cList) {
-              matchedCounterList = cList;
+          // Search if any counter cheque number is included in this admin UTR
+          for (const [cKey, list] of counterMap.entries()) {
+            if (utr && utr.includes(cKey)) {
+              matchedCounterList = list;
               break;
             }
           }
 
           if (!matchedCounterList) {
+            let displayUpiId = utr || rawUpiId;
+
             let adminStoreName = 'Unknown Store';
             let adminStoreId = 'Unknown ID';
-            const parts = String(a.upi_id).split('|||');
-            if (parts.length >= 3) {
-              adminStoreName = parts[1] || 'Unknown Store';
-              adminStoreId = parts[2] || 'Unknown ID';
-            } else if (parts.length === 2) {
-              adminStoreName = parts[1] || 'Unknown Store';
+            const extraParts = String(a.upi_id).split('|||');
+            if (extraParts.length >= 3) {
+              adminStoreName = extraParts[1] || 'Unknown Store';
+              adminStoreId = extraParts[2] || 'Unknown ID';
+            } else if (extraParts.length === 2) {
+              adminStoreName = extraParts[1] || 'Unknown Store';
             }
 
             reportsToInsert.push({
               date,
               type: 'missing_in_counter',
-              upi_id: rawUpiId,
+              upi_id: displayUpiId,
               amount: a.amount,
               counter_id: null,
               source_id: a.id,
@@ -737,7 +709,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                 transaction_date: a.date,
                 admin_store_name: adminStoreName,
                 admin_store_id: adminStoreId,
-                message: `Transaction UTR '${rawUpiId}' is available in Admin but missing from all Counter sheets.`
+                message: `Transaction UTR '${displayUpiId}' is available in Admin but missing from all Counter sheets.`
               }
             });
           }
@@ -865,7 +837,6 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           throw new Error('The selected Admin Excel sheet is empty.');
         }
 
-        const phonepeSynonyms = ['phonepereferenceid', 'phonepeid', 'phonepe', 'phonepereference'];
         const utrSynonyms = ['transactionutr', 'utr', 'transactionid', 'upiid', 'chequeno', 'chequenumber', 'cheque_number', 'referenceno', 'refno'];
         const dateSynonyms = ['transactiondate', 'transaction_date', 'date', 'chequedate', 'cheque_date', 'uploaddate'];
         const amountSynonyms = ['totaltransactionamount', 'upiamount', 'amount', 'receipt', 'receiptamount', 'receipt_amount', 'value'];
@@ -873,16 +844,15 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         const storeIdSynonyms = ['storeid', 'merchantid', 'terminalid', 'mid', 'tid', 'store_id', 'merchant_id'];
 
         const firstRow = rows[0];
-        const phonepeKey = findHeaderKey(firstRow, phonepeSynonyms);
         const utrKey = findHeaderKey(firstRow, utrSynonyms);
         const dateKey = findHeaderKey(firstRow, dateSynonyms);
         const amountKey = findHeaderKey(firstRow, amountSynonyms);
         const storeNameKey = findHeaderKey(firstRow, storeNameSynonyms);
         const storeIdKey = findHeaderKey(firstRow, storeIdSynonyms);
 
-        if ((!phonepeKey && !utrKey) || !dateKey || !amountKey) {
+        if (!utrKey || !dateKey || !amountKey) {
           throw new Error(
-            `Header verification failed. Your Admin Excel must contain a PhonePe or UTR column, "Transaction Date" (found: ${dateKey ? 'Yes' : 'No'}), and "UPI Amount" (found: ${amountKey ? 'Yes' : 'No'}).`
+            `Header verification failed. Your Admin Excel must contain a UTR column, "Transaction Date" (found: ${dateKey ? 'Yes' : 'No'}), and "UPI Amount" (found: ${amountKey ? 'Yes' : 'No'}).`
           );
         }
 
@@ -890,19 +860,14 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         const uniqueDates = new Set<string>();
 
         rows.forEach((row) => {
-          const identifiers = new Set<string>();
-          
-          if (phonepeKey && row[phonepeKey]) {
-            let id = String(row[phonepeKey]).trim();
-            if (id.endsWith('.0')) id = id.substring(0, id.length - 2);
-            if (id) identifiers.add(id);
-          }
-          
+          let utrId = '';
           if (utrKey && row[utrKey]) {
             let id = String(row[utrKey]).trim();
             if (id.endsWith('.0')) id = id.substring(0, id.length - 2);
-            if (id) identifiers.add(id);
+            utrId = id;
           }
+
+          if (!utrId) return;
 
           const rawDate = row[dateKey];
           const rawAmount = row[amountKey];
@@ -910,8 +875,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           let rowStoreName = storeNameKey ? String(row[storeNameKey]).trim() : '';
           let rowStoreId = storeIdKey ? String(row[storeIdKey]).trim() : '';
           
-          // Append Store Name and Store ID to the UPI ID for reconciliation tracking
-          let finalUpiId = Array.from(identifiers).join(',');
+          let finalUpiId = utrId;
           if (!finalUpiId) return;
           
           if (rowStoreName || rowStoreId) {
@@ -1074,7 +1038,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   };
 
   // Delete a specific batch of transactions for a particular day
-  const handleDeleteBatch = async (date: string, source: 'counter' | 'admin', counter_id: number | null) => {
+  const handleDeleteBatch = async (date: string, source: 'counter' | 'admin', counter_id: number | null, file_name?: string) => {
     if (!window.confirm(`⚠️ Are you sure you want to delete all ${source} transactions for ${date}? This will also clear discrepancy reports for this date.`)) return;
     try {
       setBacklogLoading(true);
@@ -1083,6 +1047,9 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       if (source === 'counter' && counter_id) {
         txQuery = txQuery.eq('counter_id', counter_id);
       }
+      if (file_name) {
+        txQuery = txQuery.eq('file_name', file_name);
+      }
       
       const { error: txError } = await txQuery;
       if (txError) throw new Error(`Failed to delete transactions: ${txError.message}`);
@@ -1090,6 +1057,9 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       const { error: reportsError } = await supabase.from('reports').delete().eq('date', date);
       if (reportsError) throw new Error(`Failed to delete related reports: ${reportsError.message}`);
       
+      // Regenerate reports for this date since we deleted some transactions
+      await compareTransactionsForDates([date]);
+
       alert(`🎉 Successfully deleted ${source} data for ${date}.`);
       
       // If the currently viewed batch details match, close the modal
@@ -1227,7 +1197,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       }
       
       // Query remaining for this counter and report type
-      const reportType = currentSlide === 0 ? 'missing_in_admin' : currentSlide === 1 ? 'missing_in_counter' : 'duplicate_upi';
+      const reportType = currentSlide === 0 ? 'missing_in_admin' : currentSlide === 1 ? 'missing_in_counter' : currentSlide === 2 ? 'duplicate_upi' : 'mismatched_amount';
       let remainingQuery = supabase
         .from('reports')
         .select('id')
@@ -1541,7 +1511,8 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             onWipeCounterBacklog={handleWipeCounterBacklog}
             onDeleteBatch={handleDeleteBatch}
             onOpenBatchDetails={setSelectedDetailBatch}
-            setSelectedBacklogCounter={() => {}}
+            selectedBacklogCounter={selectedBacklogCounter}
+            setSelectedBacklogCounter={setSelectedBacklogCounter}
             onRefreshLogs={fetchBacklogHistory}
           />
         )}

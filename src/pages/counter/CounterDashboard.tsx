@@ -223,42 +223,37 @@ export default function CounterDashboard({ username, onLogout }: { username: str
 
         const reportsToInsert: any[] = [];
 
-        // Group counter transactions by exact normalized Cheque No
+                        // Group counter transactions by exact normalized Cheque No
         const counterMap = new Map<string, any[]>();
         counterTxsWindow.forEach(t => {
-          const keys = String(t.upi_id).split(',');
-          keys.forEach(rawKey => {
-            let key = rawKey.trim().toLowerCase();
-            if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
-            if (!counterMap.has(key)) counterMap.set(key, []);
-            counterMap.get(key)!.push(t);
-          });
+          let key = String(t.upi_id).trim().toLowerCase();
+          if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
+          if (!counterMap.has(key)) counterMap.set(key, []);
+          counterMap.get(key)!.push(t);
         });
 
-        // Group admin transactions by exact UTR and last 10 digits
-        const adminExactMap = new Map<string, any[]>();
-        const adminLast10Map = new Map<string, any[]>();
+        // Group admin transactions by UTR
+        const adminUtrMap = new Map<string, any[]>();
+        
         adminTxsWindow.forEach(t => {
-          const keys = String(t.upi_id).split(',');
-          keys.forEach(rawKey => {
-            let key = rawKey.trim().toLowerCase();
-            if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
-            
-            if (!adminExactMap.has(key)) adminExactMap.set(key, []);
-            adminExactMap.get(key)!.push(t);
-            
-            const last10 = key.slice(-10);
-            if (last10 !== key) {
-              if (!adminLast10Map.has(last10)) adminLast10Map.set(last10, []);
-              adminLast10Map.get(last10)!.push(t);
-            }
-          });
+          const rawUpiId = String(t.upi_id).split('|||')[0];
+          // Since we removed PhonePe, there's no comma anymore for new uploads,
+          // but for backward compatibility with existing data, we take the first part
+          const parts = rawUpiId.split(',');
+          
+          let utr = parts[0]?.trim().toLowerCase() || '';
+          
+          if (utr) {
+            if (!adminUtrMap.has(utr)) adminUtrMap.set(utr, []);
+            adminUtrMap.get(utr)!.push(t);
+          }
         });
 
         // Check duplicate Cheque Numbers in Counter sheets
         for (const [, list] of counterMap.entries()) {
           const targetList = list.filter(t => t.date === date);
           if (targetList.length > 0 && list.length > 1) {
+            // Push one report per target transaction
             targetList.forEach(t => {
               if (!reportsToInsert.find(r => r.type === 'duplicate_upi' && r.upi_id === t.upi_id && r.source_id === t.id)) {
                 reportsToInsert.push({
@@ -280,22 +275,22 @@ export default function CounterDashboard({ username, onLogout }: { username: str
         }
 
         // Check duplicate Transaction UTRs in Admin sheets
-        for (const [, list] of adminExactMap.entries()) {
+        for (const [utr, list] of adminUtrMap.entries()) {
           const targetList = list.filter(t => t.date === date);
           if (targetList.length > 0 && list.length > 1) {
             targetList.forEach(t => {
-              if (!reportsToInsert.find(r => r.type === 'duplicate_upi' && r.upi_id === t.upi_id && r.source_id === t.id)) {
+              if (!reportsToInsert.find(r => r.type === 'duplicate_upi' && r.upi_id === utr && r.source_id === t.id)) {
                 reportsToInsert.push({
                   date,
                   type: 'duplicate_upi',
-                  upi_id: t.upi_id,
+                  upi_id: utr,
                   amount: t.amount,
                   counter_id: null,
                   source_id: t.id,
                   details: {
                     source: 'admin',
                     count: list.length,
-                    message: `Duplicate Transaction UTR '${t.upi_id}' loaded in Admin sheet (${list.length} records)`
+                    message: `Duplicate Transaction UTR '${utr}' loaded in Admin sheet (${list.length} records)`
                   }
                 });
               }
@@ -303,34 +298,34 @@ export default function CounterDashboard({ username, onLogout }: { username: str
           }
         }
 
-        // strict validation: missing in admin or amount discrepancies
-        targetCounterTxs.forEach(c => {
-          const keys = String(c.upi_id).split(',').map(k => {
-            let key = k.trim().toLowerCase();
-            if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
-            return key;
-          });
-
-          let matchedAdminList: any[] | undefined = undefined;
-
-          for (const cKey of keys) {
-            let aList = adminLast10Map.get(cKey);
-            if (!aList) {
-              aList = adminExactMap.get(cKey);
-            }
-            if (aList) {
-              matchedAdminList = aList;
-              break;
+        // Helper to find a match where cheque is searched inside UTR
+        const findMatch = (cKey: string) => {
+          // Iterate over all admin UTRs and see if the admin UTR includes the cheque number
+          for (const [adminUtr, list] of adminUtrMap.entries()) {
+            if (adminUtr.includes(cKey)) {
+              return list;
             }
           }
+          return undefined;
+        };
+
+        // strict validation: missing in admin or amount discrepancies
+        targetCounterTxs.forEach(c => {
+          let cKey = String(c.upi_id).trim().toLowerCase();
+          if (cKey.endsWith('.0')) cKey = cKey.substring(0, cKey.length - 2);
+
+          // Find match by searching cheque number inside admin UTRs
+          let matchedAdminList = findMatch(cKey);
 
           if (!matchedAdminList) {
+            // Missing in Admin completely
             reportsToInsert.push({
               date,
               type: 'missing_in_admin',
               upi_id: c.upi_id,
               amount: c.amount,
               counter_id: c.counter_id,
+              source_id: c.id,
               details: {
                 counter_name: c.users?.counter_name || 'Unknown',
                 cheque_date: c.date,
@@ -338,11 +333,12 @@ export default function CounterDashboard({ username, onLogout }: { username: str
               }
             });
           } else {
+            // Check strict match for amount
             const matchingAdmin = matchedAdminList.find(a => Number(a.amount) === Number(c.amount));
             if (!matchingAdmin) {
               reportsToInsert.push({
                 date,
-                type: 'missing_in_admin',
+                type: 'mismatched_amount',
                 upi_id: c.upi_id,
                 amount: c.amount,
                 counter_id: c.counter_id,
@@ -350,7 +346,7 @@ export default function CounterDashboard({ username, onLogout }: { username: str
                   counter_name: c.users?.counter_name || 'Unknown',
                   cheque_amount: c.amount,
                   admin_amounts: matchedAdminList.map(a => a.amount),
-                  message: `Cheque Number '${c.upi_id}' matched keys, but amount verification failed! Counter receipt: ${c.amount}, Admin UPI Amount: ${matchedAdminList.map(a => a.amount).join(', ')}`
+                  message: `Cheque Number '${c.upi_id}' matched an Admin UTR, but amount verification failed! Counter receipt: ${c.amount}, Admin UPI Amount: ${matchedAdminList.map(a => a.amount).join(', ')}`
                 }
               });
             }
@@ -359,36 +355,47 @@ export default function CounterDashboard({ username, onLogout }: { username: str
 
         // strict validation: missing in counter
         targetAdminTxs.forEach(a => {
-          const keys = String(a.upi_id).split(',').map(k => {
-            let key = k.trim().toLowerCase();
-            if (key.endsWith('.0')) key = key.substring(0, key.length - 2);
-            return key;
-          });
+          const rawUpiId = String(a.upi_id).split('|||')[0].trim();
+          const parts = rawUpiId.split(',');
+          
+          let utr = parts[0]?.trim().toLowerCase() || '';
 
-          let matchedCounterList: any[] | undefined = undefined;
+          let matchedCounterList = undefined;
 
-          for (const aKey of keys) {
-            let cList = counterMap.get(aKey);
-            if (!cList && aKey.length > 10) {
-              cList = counterMap.get(aKey.slice(-10));
-            }
-            if (cList) {
-              matchedCounterList = cList;
+          // Search if any counter cheque number is included in this admin UTR
+          for (const [cKey, list] of counterMap.entries()) {
+            if (utr && utr.includes(cKey)) {
+              matchedCounterList = list;
               break;
             }
           }
 
           if (!matchedCounterList) {
+            let displayUpiId = utr || rawUpiId;
+
+            let adminStoreName = 'Unknown Store';
+            let adminStoreId = 'Unknown ID';
+            const extraParts = String(a.upi_id).split('|||');
+            if (extraParts.length >= 3) {
+              adminStoreName = extraParts[1] || 'Unknown Store';
+              adminStoreId = extraParts[2] || 'Unknown ID';
+            } else if (extraParts.length === 2) {
+              adminStoreName = extraParts[1] || 'Unknown Store';
+            }
+
             reportsToInsert.push({
               date,
               type: 'missing_in_counter',
-              upi_id: a.upi_id,
+              upi_id: displayUpiId,
               amount: a.amount,
               counter_id: null,
+              source_id: a.id,
               details: {
                 admin_amount: a.amount,
                 transaction_date: a.date,
-                message: `Transaction UTR '${a.upi_id}' is available in Admin but missing from all Counter sheets.`
+                admin_store_name: adminStoreName,
+                admin_store_id: adminStoreId,
+                message: `Transaction UTR '${displayUpiId}' is available in Admin but missing from all Counter sheets.`
               }
             });
           }
@@ -428,8 +435,6 @@ export default function CounterDashboard({ username, onLogout }: { username: str
       if (userError || !user) {
         throw new Error(`Profile query failed for user '${username}': ${userError?.message || 'User not found.'}`);
       }
-
-      let phonepeId = '';
 
       // Helper function to read file as binary string asynchronously
       const readFileAsBinary = (file: File): Promise<string> => {
@@ -472,23 +477,7 @@ export default function CounterDashboard({ username, onLogout }: { username: str
             continue;
           }
 
-          // Extract PhonePe ID from column values and keys
-          for (const row of rows) {
-            for (const key of Object.keys(row)) {
-              const val = String(row[key]).trim();
-              const keyStr = String(key).trim();
-              
-              if (keyStr.toUpperCase().includes('PHONE PE ID') || keyStr.toUpperCase().includes('PHONEPE ID') || keyStr.toUpperCase().includes('SKC SALES')) {
-                phonepeId = keyStr;
-                break;
-              }
-              if (val.toUpperCase().includes('PHONE PE ID') || val.toUpperCase().includes('PHONEPE ID') || val.toUpperCase().includes('SKC SALES')) {
-                phonepeId = val;
-                break;
-              }
-            }
-            if (phonepeId) break;
-          }
+
 
           rows.forEach((row, index) => {
             let upiId = String(row[chequeKey]).trim();
@@ -513,7 +502,8 @@ export default function CounterDashboard({ username, onLogout }: { username: str
               date: dateStr,
               amount: amountNum,
               source: 'counter',
-              counter_id: user.id
+              counter_id: user.id,
+              file_name: file.name
             });
 
             uniqueDates.add(dateStr);
@@ -525,15 +515,7 @@ export default function CounterDashboard({ username, onLogout }: { username: str
         throw new Error('No valid transaction rows found in any of the selected files or sheets.');
       }
 
-      if (phonepeId) {
-        const { error: updateError } = await supabase
-          .from('users')
-          .update({ counter_name: phonepeId })
-          .eq('id', user.id);
-        if (updateError) {
-          console.error('Failed to update counter_name with phonepeId:', updateError.message);
-        }
-      }
+
 
       const dateArray = Array.from(uniqueDates);
 
