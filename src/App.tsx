@@ -2,10 +2,12 @@ import { useState } from 'react';
 import Login from './pages/Login';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import CounterDashboard from './pages/counter/CounterDashboard';
+import TeamLeadDashboard from './pages/team_lead/TeamLeadDashboard';
+import AuditorDashboard from './pages/auditor/AuditorDashboard';
 
 type AuthState = {
   isAuthenticated: boolean;
-  role: 'admin' | 'counter' | null;
+  role: 'admin' | 'counter' | 'team_lead' | 'auditor' | null;
   username: string | null;
 };
 
@@ -26,7 +28,7 @@ function App() {
     };
   });
 
-  const handleLogin = (role: 'admin' | 'counter', username: string) => {
+  const handleLogin = (role: 'admin' | 'counter' | 'team_lead' | 'auditor', username: string) => {
     const newState: AuthState = { isAuthenticated: true, role, username };
     setAuth(newState);
     localStorage.setItem('upi_auth_state', JSON.stringify(newState));
@@ -43,6 +45,8 @@ function App() {
       {!auth.isAuthenticated && <Login onLogin={handleLogin} />}
       {auth.isAuthenticated && auth.role === 'admin' && <AdminDashboard onLogout={handleLogout} />}
       {auth.isAuthenticated && auth.role === 'counter' && <CounterDashboard username={auth.username || ''} onLogout={handleLogout} />}
+      {auth.isAuthenticated && auth.role === 'team_lead' && <TeamLeadDashboard username={auth.username || ''} onLogout={handleLogout} />}
+      {auth.isAuthenticated && auth.role === 'auditor' && <AuditorDashboard username={auth.username || ''} onLogout={handleLogout} />}
     </>
   );
 }

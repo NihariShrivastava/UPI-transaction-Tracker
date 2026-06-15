@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sparkles, Loader2, Search, AlertTriangle } from 'lucide-react';
+import { X, Sparkles, Loader2, Search, AlertTriangle, MessageSquare, CheckCircle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '../../../components/ui/Table';
@@ -19,12 +19,13 @@ interface AddCounterModalProps {
 interface ReportGroupDetailsModalProps {
   group: any;
   onClose: () => void;
-  reportsFilterDate: string;
-  onResolveReport: (id: number) => void;
-  onEditReport: (id: number, newUpiId: string, newAmount: number) => Promise<void>;
+  reportsFilterDate?: string;
+  onResolveReport?: (id: number) => void;
+  onEditReport?: (id: number, newUpiId: string, newAmount: number) => Promise<void>;
   onAddRemark?: (id: number, remark: string) => Promise<void>;
   onMatchReport?: (id: number) => Promise<boolean>;
   onMatchAllReports?: () => Promise<{ allMatched: boolean, remainingCount: number }>;
+  role?: 'admin' | 'team_lead' | 'auditor';
 }
 
 interface BatchDetailsModalProps {
@@ -102,7 +103,8 @@ export function ReportGroupDetailsModal({
   onEditReport,
   onAddRemark,
   onMatchReport,
-  onMatchAllReports
+  onMatchAllReports,
+  role = 'admin'
 }: ReportGroupDetailsModalProps) {
   const [selectedUpiId, setSelectedUpiId] = useState('');
   const [editingReportId, setEditingReportId] = useState<number | null>(null);
@@ -217,8 +219,8 @@ export function ReportGroupDetailsModal({
                       <TableHead className="w-[80px]">#</TableHead>
                       <TableHead>Cheque Number / UTR</TableHead>
                       <TableHead>Amount</TableHead>
-                      <TableHead>Admin Remark</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                      <TableHead>Team Lead Remark</TableHead>
+                      {role === 'team_lead' && <TableHead className="text-right">Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -261,6 +263,15 @@ export function ReportGroupDetailsModal({
                                   className="w-[120px] bg-[#000000] border border-purple-500/50 rounded-xl h-9 pl-6 pr-3 text-xs text-purple-400 font-bold focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
                                 />
                               </div>
+                            ) : report.type === 'mismatched_amount' && report.details?.admin_amounts ? (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-emerald-400 text-xs bg-emerald-500/10 px-1.5 py-0.5 rounded w-fit">
+                                  Counter: ₹{Number(report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                </span>
+                                <span className="text-red-400 text-xs bg-red-500/10 px-1.5 py-0.5 rounded w-fit">
+                                  Admin: ₹{report.details.admin_amounts.map((n: string) => Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2 })).join(', ')}
+                                </span>
+                              </div>
                             ) : (
                               `₹${Number(report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                             )}
@@ -272,53 +283,69 @@ export function ReportGroupDetailsModal({
                               <span className="opacity-40 italic">None</span>
                             )}
                           </TableCell>
-                          <TableCell className="text-right">
-                            {isEditing ? (
-                              <div className="flex justify-end gap-2">
-                                <Button 
-                                  variant="primary" 
-                                  size="sm" 
-                                  disabled={isSaving}
-                                  onClick={async () => {
-                                    if (!editUpiId.trim() || !editAmount.trim()) {
-                                      alert("Cheque/UTR and Amount cannot be empty.");
-                                      return;
-                                    }
-                                    setIsSaving(true);
-                                    try {
-                                      await onEditReport(report.id, editUpiId, Number(editAmount));
-                                      setEditingReportId(null);
-                                    } catch (e) {
-                                      console.error(e);
-                                    } finally {
-                                      setIsSaving(false);
-                                    }
-                                  }}
-                                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs h-8 px-4"
-                                >
-                                  {isSaving ? "Saving..." : "Save"}
-                                </Button>
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  disabled={isSaving}
-                                  onClick={() => setEditingReportId(null)}
-                                  className="text-red-400 hover:text-red-300 hover:bg-red-500/10 font-semibold rounded-lg text-xs h-8 px-3"
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            ) : isRemarking ? (
-                              <div className="flex justify-end gap-2 items-center">
-                                <input
-                                  type="text"
-                                  value={editRemark}
-                                  onChange={e => setEditRemark(e.target.value)}
-                                  placeholder="Type remark..."
-                                  className="w-[150px] bg-[#000000] border border-blue-500/50 focus:border-blue-500 rounded-xl h-8 px-3 text-xs text-white focus:outline-none transition-all"
-                                  autoFocus
-                                  onKeyDown={async (e) => {
-                                    if (e.key === 'Enter') {
+                          {role === 'team_lead' && (
+                            <TableCell className="text-right">
+                              {isEditing ? (
+                                <div className="flex justify-end gap-2">
+                                  <Button 
+                                    variant="primary" 
+                                    size="sm" 
+                                    disabled={isSaving}
+                                    onClick={async () => {
+                                      if (!editUpiId.trim() || !editAmount.trim()) {
+                                        alert("Cheque/UTR and Amount cannot be empty.");
+                                        return;
+                                      }
+                                      setIsSaving(true);
+                                      try {
+                                        if (onEditReport) await onEditReport(report.id, editUpiId, Number(editAmount));
+                                        setEditingReportId(null);
+                                      } catch (e) {
+                                        console.error(e);
+                                      } finally {
+                                        setIsSaving(false);
+                                      }
+                                    }}
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs h-8 px-4"
+                                  >
+                                    {isSaving ? "Saving..." : "Save"}
+                                  </Button>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    disabled={isSaving}
+                                    onClick={() => setEditingReportId(null)}
+                                    className="text-red-400 hover:text-red-300 hover:bg-red-500/10 font-semibold rounded-lg text-xs h-8 px-3"
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              ) : isRemarking ? (
+                                <div className="flex justify-end gap-2 items-center">
+                                  <input
+                                    type="text"
+                                    value={editRemark}
+                                    onChange={e => setEditRemark(e.target.value)}
+                                    placeholder="Type remark..."
+                                    className="w-[150px] bg-[#000000] border border-blue-500/50 focus:border-blue-500 rounded-xl h-8 px-3 text-xs text-white focus:outline-none transition-all"
+                                    autoFocus
+                                    onKeyDown={async (e) => {
+                                      if (e.key === 'Enter') {
+                                        setIsSaving(true);
+                                        try {
+                                          if (onAddRemark) await onAddRemark(report.id, editRemark);
+                                          setRemarkingReportId(null);
+                                        } finally {
+                                          setIsSaving(false);
+                                        }
+                                      }
+                                    }}
+                                  />
+                                  <Button 
+                                    variant="primary" 
+                                    size="sm" 
+                                    disabled={isSaving}
+                                    onClick={async () => {
                                       setIsSaving(true);
                                       try {
                                         if (onAddRemark) await onAddRemark(report.id, editRemark);
@@ -326,87 +353,73 @@ export function ReportGroupDetailsModal({
                                       } finally {
                                         setIsSaving(false);
                                       }
-                                    }
-                                  }}
-                                />
-                                <Button 
-                                  variant="primary" 
-                                  size="sm" 
-                                  disabled={isSaving}
-                                  onClick={async () => {
-                                    setIsSaving(true);
-                                    try {
-                                      if (onAddRemark) await onAddRemark(report.id, editRemark);
-                                      setRemarkingReportId(null);
-                                    } finally {
-                                      setIsSaving(false);
-                                    }
-                                  }}
-                                  className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-xs h-8 px-3"
-                                >
-                                  {isSaving ? "..." : "Save"}
-                                </Button>
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  disabled={isSaving}
-                                  onClick={() => setRemarkingReportId(null)}
-                                  className="text-red-400 hover:text-red-300 hover:bg-red-500/10 font-semibold rounded-lg text-xs h-8 px-3"
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            ) : (
-                              <div className="flex justify-end gap-2">
-                                {onAddRemark && (
+                                    }}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-xs h-8 px-3"
+                                  >
+                                    {isSaving ? "..." : "Save"}
+                                  </Button>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    disabled={isSaving}
+                                    onClick={() => setRemarkingReportId(null)}
+                                    className="text-red-400 hover:text-red-300 hover:bg-red-500/10 font-semibold rounded-lg text-xs h-8 px-3"
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex justify-end gap-2">
+                                  {onAddRemark && (
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      onClick={() => {
+                                        setRemarkingReportId(report.id);
+                                        setEditRemark(report.details?.admin_remark || "");
+                                      }}
+                                      className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 px-3 font-semibold rounded-lg text-xs h-8"
+                                    >
+                                      Remark
+                                    </Button>
+                                  )}
                                   <Button 
                                     variant="ghost" 
                                     size="sm" 
                                     onClick={() => {
-                                      setRemarkingReportId(report.id);
-                                      setEditRemark(report.details?.admin_remark || "");
+                                      setEditingReportId(report.id);
+                                      setEditUpiId(report.upi_id);
+                                      setEditAmount(String(report.amount));
                                     }}
-                                    className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 px-3 font-semibold rounded-lg text-xs h-8"
+                                    className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-3 font-semibold rounded-lg text-xs h-8"
                                   >
-                                    Remark
+                                    Edit
                                   </Button>
-                                )}
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  onClick={() => {
-                                    setEditingReportId(report.id);
-                                    setEditUpiId(report.upi_id);
-                                    setEditAmount(String(report.amount));
-                                  }}
-                                  className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-3 font-semibold rounded-lg text-xs h-8"
-                                >
-                                  Edit
-                                </Button>
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  disabled={isMatching[report.id]}
-                                  onClick={async () => {
-                                    if (onMatchReport) {
-                                      setIsMatching(prev => ({ ...prev, [report.id]: true }));
-                                      const isMatched = await onMatchReport(report.id);
-                                      setIsMatching(prev => ({ ...prev, [report.id]: false }));
-                                      if (!isMatched) {
-                                        setErrorMessage("This entry did not match any uploaded Admin Excel records.");
-                                        setTimeout(() => setErrorMessage(null), 5000);
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    disabled={isMatching[report.id]}
+                                    onClick={async () => {
+                                      if (onMatchReport) {
+                                        setIsMatching(prev => ({ ...prev, [report.id]: true }));
+                                        const isMatched = await onMatchReport(report.id);
+                                        setIsMatching(prev => ({ ...prev, [report.id]: false }));
+                                        if (!isMatched) {
+                                          setErrorMessage("This entry did not match any uploaded Admin Excel records.");
+                                          setTimeout(() => setErrorMessage(null), 5000);
+                                        }
+                                      } else if (onResolveReport) {
+                                        onResolveReport(report.id);
                                       }
-                                    } else {
-                                      onResolveReport(report.id);
-                                    }
-                                  }}
-                                  className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 px-3 font-semibold rounded-lg text-xs h-8"
-                                >
-                                  {isMatching[report.id] ? "Matching..." : "Match"}
-                                </Button>
-                              </div>
-                            )}
-                          </TableCell>
+                                    }}
+                                    className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 px-3 font-semibold rounded-lg text-xs h-8"
+                                  >
+                                    {isMatching[report.id] ? "Matching..." : "Match"}
+                                  </Button>
+                                </div>
+                              )}
+                            </TableCell>
+                          )}
                         </TableRow>
                       );
                     })}
@@ -575,9 +588,18 @@ export function BatchDetailsModal({
 interface DuplicateDetailsModalProps {
   report: any;
   onClose: () => void;
+  onResolveReport?: (id: number) => void;
+  onAddRemark?: (id: number, remark: string) => Promise<void>;
+  role?: 'admin' | 'team_lead' | 'auditor';
 }
 
-export function DuplicateDetailsModal({ report, onClose }: DuplicateDetailsModalProps) {
+export function DuplicateDetailsModal({ 
+  report, 
+  onClose,
+  onResolveReport,
+  onAddRemark,
+  role = 'admin'
+}: DuplicateDetailsModalProps) {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -588,10 +610,10 @@ export function DuplicateDetailsModal({ report, onClose }: DuplicateDetailsModal
       try {
         const { data, error } = await supabase
           .from('transactions')
-          .select('id, upi_id, amount, date, source, counter_id, users(counter_name)')
-          .eq('date', report.date)
+          .select('id, upi_id, amount, date, source, counter_id, users(username, counter_name)')
           .ilike('upi_id', `${report.upi_id}%`)
-          .order('source', { ascending: false });
+          .order('source', { ascending: false })
+          .order('date', { ascending: false });
         
         if (!error && data) {
           setTransactions(data);
@@ -677,7 +699,7 @@ export function DuplicateDetailsModal({ report, onClose }: DuplicateDetailsModal
                           </span>
                         </TableCell>
                         <TableCell className="font-mono text-white text-sm font-semibold">
-                          {tx.source === 'admin' ? 'Admin Sheet' : tx.users?.counter_name || `Counter ${tx.counter_id}`}
+                          {tx.source === 'admin' ? 'Admin Sheet' : tx.users?.username || tx.users?.counter_name || `Counter ${tx.counter_id}`}
                         </TableCell>
                         <TableCell className="font-mono text-text-secondary text-xs truncate max-w-[150px]">
                           {String(tx.upi_id).split('|||')[0]}
@@ -707,6 +729,319 @@ export function DuplicateDetailsModal({ report, onClose }: DuplicateDetailsModal
           </div>
         </motion.div>
       </div>
+    </AnimatePresence>
+  );
+}
+
+interface AddAuditorModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  newUsername: string;
+  setNewUsername: (val: string) => void;
+  newPassword: string;
+  setNewPassword: (val: string) => void;
+  selectedTeamLead: string;
+  setSelectedTeamLead: (val: string) => void;
+  teamLeads: any[];
+  onSubmit: (e: React.FormEvent) => void;
+}
+
+export function AddAuditorModal({
+  isOpen,
+  onClose,
+  newUsername,
+  setNewUsername,
+  newPassword,
+  setNewPassword,
+  selectedTeamLead,
+  setSelectedTeamLead,
+  teamLeads,
+  onSubmit
+}: AddAuditorModalProps) {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            className="w-full max-w-md"
+          >
+            <Card className="bg-[#111111] border-[#222222] shadow-[0_0_50px_rgba(16,185,129,0.15)] rounded-2xl">
+              <CardHeader className="flex flex-row items-center justify-between pb-4 border-b border-[#222222]">
+                <CardTitle className="text-xl text-emerald-400 font-bold">Add New Auditor</CardTitle>
+                <button onClick={onClose} className="text-text-secondary hover:text-white p-1 rounded-lg hover:bg-[#222222] transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <form onSubmit={onSubmit} className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-text-secondary">Username</label>
+                    <input 
+                      type="text" required value={newUsername} onChange={e => setNewUsername(e.target.value)}
+                      className="w-full bg-[#000000] border border-[#222222] rounded-xl h-11 px-4 text-text-primary focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+                      placeholder="Enter username"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-text-secondary">Password</label>
+                    <input 
+                      type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)}
+                      className="w-full bg-[#000000] border border-[#222222] rounded-xl h-11 px-4 text-text-primary focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+                      placeholder="Enter password"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-text-secondary">Team Lead Assigned</label>
+                    <select
+                      value={selectedTeamLead}
+                      onChange={e => setSelectedTeamLead(e.target.value)}
+                      className="w-full bg-[#000000] border border-[#222222] rounded-xl h-11 px-4 text-text-primary focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+                    >
+                      <option value="">Select Team Lead</option>
+                      {teamLeads.map(tl => (
+                        <option key={tl.id} value={tl.id}>{tl.username}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="pt-4 flex justify-end gap-3">
+                    <Button type="button" variant="ghost" onClick={onClose} className="rounded-xl">Cancel</Button>
+                    <Button type="submit" variant="primary" className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-[0_0_15px_rgba(16,185,129,0.3)]">Create Auditor</Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+interface AddTeamLeadModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  newUsername: string;
+  setNewUsername: (val: string) => void;
+  newPassword: string;
+  setNewPassword: (val: string) => void;
+  selectedCounters: string[];
+  setSelectedCounters: (val: string[]) => void;
+  availableCounters: any[];
+  onSubmit: (e: React.FormEvent) => void;
+}
+
+export function AddTeamLeadModal({
+  isOpen,
+  onClose,
+  newUsername,
+  setNewUsername,
+  newPassword,
+  setNewPassword,
+  selectedCounters,
+  setSelectedCounters,
+  availableCounters,
+  onSubmit
+}: AddTeamLeadModalProps) {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            className="w-full max-w-md"
+          >
+            <Card className="bg-[#111111] border-[#222222] shadow-[0_0_50px_rgba(59,130,246,0.15)] rounded-2xl">
+              <CardHeader className="flex flex-row items-center justify-between pb-4 border-b border-[#222222]">
+                <CardTitle className="text-xl text-blue-400 font-bold">Add New Team Lead</CardTitle>
+                <button onClick={onClose} className="text-text-secondary hover:text-white p-1 rounded-lg hover:bg-[#222222] transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <form onSubmit={onSubmit} className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-text-secondary">Username</label>
+                    <input 
+                      type="text" required value={newUsername} onChange={e => setNewUsername(e.target.value)}
+                      className="w-full bg-[#000000] border border-[#222222] rounded-xl h-11 px-4 text-text-primary focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
+                      placeholder="Enter username"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-text-secondary">Password</label>
+                    <input 
+                      type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)}
+                      className="w-full bg-[#000000] border border-[#222222] rounded-xl h-11 px-4 text-text-primary focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
+                      placeholder="Enter password"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-text-secondary">Counters Assigned (Check to select)</label>
+                    <div className="w-full bg-[#000000] border border-[#222222] rounded-xl p-3 text-text-primary h-48 overflow-y-auto flex flex-col gap-2 shadow-inner">
+                      {availableCounters.map(c => (
+                        <label key={c.id} className="flex items-center gap-3 p-2 hover:bg-[#222222] rounded-lg cursor-pointer transition-colors">
+                          <input 
+                            type="checkbox" 
+                            checked={selectedCounters.includes(c.username)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedCounters([...selectedCounters, c.username]);
+                              } else {
+                                setSelectedCounters(selectedCounters.filter(sc => sc !== c.username));
+                              }
+                            }}
+                            className="w-4 h-4 rounded border-[#444444] text-blue-500 focus:ring-blue-500 bg-[#111111] cursor-pointer"
+                          />
+                          <span className="text-sm font-semibold">{c.username}</span>
+                        </label>
+                      ))}
+                      {availableCounters.length === 0 && (
+                        <span className="text-xs text-text-secondary italic p-2">No counters available to assign.</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="pt-4 flex justify-end gap-3">
+                    <Button type="button" variant="ghost" onClick={onClose} className="rounded-xl">Cancel</Button>
+                    <Button type="submit" variant="primary" className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-[0_0_15px_rgba(59,130,246,0.3)]">Create Team Lead</Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+interface EditUserModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  user: any;
+  editUsername: string;
+  setEditUsername: (val: string) => void;
+  editPassword: string;
+  setEditPassword: (val: string) => void;
+  selectedTeamLead: string;
+  setSelectedTeamLead: (val: string) => void;
+  selectedCounters: string[];
+  setSelectedCounters: (val: string[]) => void;
+  teamLeads: any[];
+  availableCounters: any[];
+  onSubmit: (e: React.FormEvent) => void;
+}
+
+export function EditUserModal({
+  isOpen,
+  onClose,
+  user,
+  editUsername,
+  setEditUsername,
+  editPassword,
+  setEditPassword,
+  selectedTeamLead,
+  setSelectedTeamLead,
+  selectedCounters,
+  setSelectedCounters,
+  teamLeads,
+  availableCounters,
+  onSubmit
+}: EditUserModalProps) {
+  if (!user) return null;
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            className="w-full max-w-md"
+          >
+            <Card className="bg-[#111111] border-[#222222] shadow-[0_0_50px_rgba(168,85,247,0.15)] rounded-2xl">
+              <CardHeader className="flex flex-row items-center justify-between pb-4 border-b border-[#222222]">
+                <CardTitle className="text-xl text-fuchsia-400 font-bold">Edit User Details</CardTitle>
+                <button onClick={onClose} className="text-text-secondary hover:text-white p-1 rounded-lg hover:bg-[#222222] transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <form onSubmit={onSubmit} className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-text-secondary">Username</label>
+                    <input 
+                      type="text" required value={editUsername} onChange={e => setEditUsername(e.target.value)}
+                      className="w-full bg-[#000000] border border-[#222222] rounded-xl h-11 px-4 text-text-primary focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-text-secondary">Password</label>
+                    <input 
+                      type="text" required value={editPassword} onChange={e => setEditPassword(e.target.value)}
+                      className="w-full bg-[#000000] border border-[#222222] rounded-xl h-11 px-4 text-text-primary focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50 focus:border-fuchsia-500 transition-all"
+                    />
+                  </div>
+
+                  {user.role === 'auditor' && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-text-secondary">Team Lead Assigned</label>
+                      <select
+                        value={selectedTeamLead}
+                        onChange={e => setSelectedTeamLead(e.target.value)}
+                        className="w-full bg-[#000000] border border-[#222222] rounded-xl h-11 px-4 text-text-primary focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+                      >
+                        <option value="">Select Team Lead</option>
+                        {teamLeads.map(tl => (
+                          <option key={tl.id} value={tl.id}>{tl.username}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {user.role === 'team_lead' && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-text-secondary">Counters Assigned (Check to select)</label>
+                      <div className="w-full bg-[#000000] border border-[#222222] rounded-xl p-3 text-text-primary h-48 overflow-y-auto flex flex-col gap-2 shadow-inner">
+                        {availableCounters.map(c => (
+                          <label key={c.id} className="flex items-center gap-3 p-2 hover:bg-[#222222] rounded-lg cursor-pointer transition-colors">
+                            <input 
+                              type="checkbox" 
+                              checked={selectedCounters.includes(c.username)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedCounters([...selectedCounters, c.username]);
+                                } else {
+                                  setSelectedCounters(selectedCounters.filter(sc => sc !== c.username));
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-[#444444] text-fuchsia-500 focus:ring-fuchsia-500 bg-[#111111] cursor-pointer"
+                            />
+                            <span className="text-sm font-semibold">{c.username}</span>
+                          </label>
+                        ))}
+                        {availableCounters.length === 0 && (
+                          <span className="text-xs text-text-secondary italic p-2">No counters available to assign.</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-4 flex justify-end gap-3">
+                    <Button type="button" variant="ghost" onClick={onClose} className="rounded-xl">Cancel</Button>
+                    <Button type="submit" variant="primary" className="bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-xl shadow-[0_0_15px_rgba(168,85,247,0.3)]">Save Changes</Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
+      )}
     </AnimatePresence>
   );
 }

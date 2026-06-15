@@ -26,8 +26,8 @@ export default function ControlModules({ onTabSelect }: ControlModulesProps) {
                 <Users className="w-8 h-8 text-white transition-colors group-hover:text-purple-400" />
               </div>
               <div>
-                <h3 className="font-extrabold text-lg text-white group-hover:text-purple-400 transition-colors">Manage Counters</h3>
-                <p className="text-sm text-text-secondary mt-2 leading-relaxed">Add, edit, or remove client counters and monitor account access.</p>
+                <h3 className="font-extrabold text-lg text-white group-hover:text-purple-400 transition-colors">Counter Management</h3>
+                <p className="text-sm text-text-secondary mt-2 leading-relaxed">Manage counters, auditors, and team leads.</p>
               </div>
             </CardContent>
           </Card>

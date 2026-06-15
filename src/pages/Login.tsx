@@ -6,7 +6,7 @@ import { Button } from '../components/ui/Button';
 import Logo from '../components/ui/Logo';
 import { supabase } from '../lib/supabase';
 
-export default function Login({ onLogin }: { onLogin: (role: 'admin' | 'counter', username: string) => void }) {
+export default function Login({ onLogin }: { onLogin: (role: 'admin' | 'counter' | 'team_lead' | 'auditor', username: string) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -58,7 +58,7 @@ export default function Login({ onLogin }: { onLogin: (role: 'admin' | 'counter'
         console.error('Failed to update logins counter:', logErr);
       }
 
-      onLogin(data.role as 'admin' | 'counter', data.username);
+      onLogin(data.role as 'admin' | 'counter' | 'team_lead' | 'auditor', data.username);
     } catch (err) {
       console.error(err);
       setError('Network error. Please try again.');

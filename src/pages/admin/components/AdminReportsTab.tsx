@@ -19,12 +19,17 @@ interface AdminReportsTabProps {
   onEditReport?: (id: number, newUpiId: string, newAmount: number) => Promise<void>;
   onAddRemark?: (id: number, remark: string) => Promise<void>;
   onMatchReport?: (id: number) => Promise<boolean>;
+  onResolveReport?: (id: number) => void;
   onOpenDuplicateDetails?: (report: any) => void;
   uploadMetrics?: {
     byCounter: Record<string, number>;
     byStore: Record<string, number>;
     byAdmin: number;
   };
+  role?: 'admin' | 'team_lead' | 'auditor';
+  onApproveReport?: (id: number) => Promise<void>;
+  onRejectReport?: (id: number) => Promise<void>;
+  renderCustomSlide?: (slideIndex: number) => React.ReactNode;
 }
 
 export default function AdminReportsTab({
@@ -41,8 +46,13 @@ export default function AdminReportsTab({
   onEditReport,
   onAddRemark,
   onMatchReport,
+  onResolveReport,
   onOpenDuplicateDetails,
-  uploadMetrics
+  uploadMetrics,
+  role = 'admin',
+  onApproveReport,
+  onRejectReport,
+  renderCustomSlide
 }: AdminReportsTabProps) {
   const reportsDateInputRef = useRef<HTMLInputElement>(null);
   const [tempFilterDate, setTempFilterDate] = useState(reportsFilterDate);
@@ -137,7 +147,7 @@ export default function AdminReportsTab({
               'UPI ID / Cheque No': r.upi_id,
               'Amount': r.amount,
               'Date': r.date || reportsFilterDate || new Date().toISOString().split('T')[0],
-              'Type': 'Missing in Admin',
+              'Type': 'Missing in PhonePe but available in Excellon',
               'Details': r.details?.message || ''
             });
           });
@@ -158,7 +168,7 @@ export default function AdminReportsTab({
             'UPI ID / UTR': r.upi_id,
             'Amount': r.amount,
             'Date': r.date || reportsFilterDate || new Date().toISOString().split('T')[0],
-            'Type': 'Missing in Counter',
+            'Type': 'Missing in Excellon but available in PhonePe',
             'Details': r.details?.message || ''
           });
         });
@@ -340,8 +350,10 @@ export default function AdminReportsTab({
         </Button>
       </div>
 
-      {/* Slide Content with Date Filter & Table */}
-      <div className="bg-[#111111] border border-[#222222] rounded-2xl p-6 shadow-2xl relative overflow-hidden min-h-[400px]">
+      {renderCustomSlide && currentSlide >= 5 ? (
+        renderCustomSlide(currentSlide)
+      ) : (
+        <div className="bg-[#111111] border border-[#222222] rounded-2xl p-6 shadow-2xl relative overflow-hidden min-h-[400px]">
         
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
           <div className="text-sm text-text-secondary flex items-center">
@@ -601,22 +613,22 @@ export default function AdminReportsTab({
           </div>
         ) : (
           <div>
-            {(currentSlide === 1 || currentSlide === 2) && (
+            {(currentSlide === 1 || currentSlide === 2 || currentSlide === 4) && (
               <div className="mb-6 p-4 bg-[#151515] border border-[#222222] rounded-2xl flex items-center justify-between shadow-md animate-in fade-in duration-300">
                 <span className="text-xs text-text-secondary font-medium">
-                  Total Discrepancies Count:
+                  Total {currentSlide === 4 ? 'Pending Approvals' : 'Discrepancies'} Count:
                 </span>
                 <span className={`px-3 py-1 rounded-full text-xs font-extrabold border ${
-                  currentSlide === 1 
-                    ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' 
-                    : 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+                  currentSlide === 1 ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' : 
+                  currentSlide === 4 ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' : 
+                  'bg-orange-500/10 text-orange-400 border-orange-500/20'
                 }`}>
-                  {filteredReportsData.length} {currentSlide === 1 ? 'Cards Mismatched' : 'Duplicate Entries'}
+                  {filteredReportsData.length} entries
                 </span>
               </div>
             )}
             {(currentSlide === 0 || currentSlide === 3) ? (
-              /* Slide 0: Missing in Admin (Grouped by Counter Cards) */
+              /* Slide 0 & 3: Grouped by Counter Cards */
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
                 {filteredGroupedReportsByCounter
                 .filter(g => selectedCounterFilter.length === 0 || selectedCounterFilter.includes(g.username))
@@ -637,7 +649,7 @@ export default function AdminReportsTab({
                   <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
                   <div>
                     <div className="flex items-center justify-between mb-4">
-                      <span className="inline-flex items-center justify-center p-2.5 rounded-xl bg-purple-500/10 text-purple-400">
+                      <span className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400">
                         <Users className="w-5 h-5" />
                       </span>
                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
@@ -648,7 +660,7 @@ export default function AdminReportsTab({
                       {group.username}
                     </h4>
                     <p className="text-xs text-text-secondary mt-1">
-                      Discrepancy: <span className="text-white font-bold">{group.reports.length} items</span> {currentSlide === 3 ? 'with mismatched amounts.' : 'completely missing in Admin spreadsheet.'}
+                      Discrepancy: <span className="text-white font-bold">{group.reports.length} items</span> {currentSlide === 3 ? 'with mismatched amounts.' : 'completely missing in PhonePe but available in Excellon.'}
                     </p>
                   </div>
                   <div className="mt-6 pt-4 border-t border-[#222222]/80 flex items-center justify-between">
@@ -663,7 +675,7 @@ export default function AdminReportsTab({
               ))}
               </div>
             ) : (
-              /* Slide 1 & 2: Render individual cards */
+              /* Slide 1, 2, 4: Render individual cards */
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
                 {filteredReportsData
                   .filter((report) => {
@@ -715,7 +727,7 @@ export default function AdminReportsTab({
                             ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
                             : 'bg-orange-500/10 text-orange-400 border border-orange-500/20'
                         }`}>
-                          {report.type === 'missing_in_counter' ? 'Missing Counter' : 'Duplicate'}
+                          {report.type === 'missing_in_counter' ? 'Missing in Excellon' : 'Duplicate'}
                         </span>
                       </div>
 
@@ -747,11 +759,24 @@ export default function AdminReportsTab({
                             {report.upi_id}
                           </h4>
                           <p className="text-xs text-text-secondary mt-2 leading-relaxed">
-                            {report.details?.message || (
-                              report.type === 'missing_in_counter'
-                                ? 'Available in Admin Excel sheet but missing from all Counter sheets.'
-                                : 'Multiple transaction instances found on this date.'
+                            {currentSlide === 4 && report.details?.approval_status === 'pending_resolve' && (
+                              <span className="text-emerald-400 font-bold block mb-1">Action: Proposed to Resolve</span>
                             )}
+                            {currentSlide === 4 && report.details?.approval_status === 'pending_edit' && (
+                              <span className="text-purple-400 font-bold block mb-1">
+                                Action: Proposed Edit to {report.details.proposed_edit?.upi_id} (₹{report.details.proposed_edit?.amount})
+                              </span>
+                            )}
+                            {currentSlide === 4 && report.details?.approval_status === 'pending_match_check' && (
+                              <span className="text-blue-400 font-bold block mb-1">Action: Successfully Matched. Awaiting verification.</span>
+                            )}
+                            {report.details?.message 
+                              ? report.details.message.replace(/available in Admin but missing from all Counter sheets/gi, 'Missing in Excellon but available in PhonePe')
+                              : (
+                                  report.type === 'missing_in_counter'
+                                    ? 'Missing in Excellon but available in PhonePe.'
+                                    : 'Multiple transaction instances found on this date.'
+                                )}
                           </p>
                           {currentSlide === 1 && (
                             <div className="mt-2 flex flex-col gap-1">
@@ -767,7 +792,7 @@ export default function AdminReportsTab({
                           )}
                           {report.details?.admin_remark && (
                             <div className="mt-3 p-2 rounded-lg bg-purple-500/10 border border-purple-500/20">
-                              <p className="text-[10px] uppercase tracking-wider text-purple-400 font-semibold mb-1">Admin Remark</p>
+                              <p className="text-[10px] uppercase tracking-wider text-purple-400 font-semibold mb-1">Team Lead Remark</p>
                               <p className="text-xs text-white leading-relaxed">{report.details.admin_remark}</p>
                             </div>
                           )}
@@ -877,54 +902,104 @@ export default function AdminReportsTab({
                         </div>
                       ) : (
                         <div className="flex items-center gap-1">
-                          {onAddRemark && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setRemarkingReportId(report.id);
-                                setEditRemark(report.details?.admin_remark || "");
-                              }}
-                              className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 px-2 font-semibold rounded-lg text-[10px] h-7"
-                            >
-                              Remark
-                            </Button>
+                          {currentSlide === 4 && role === 'auditor' && (
+                            <>
+                              {onApproveReport && (
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  onClick={(e) => { e.stopPropagation(); onApproveReport(report.id); }}
+                                  className="bg-emerald-600/80 hover:bg-emerald-600 text-white px-2 font-semibold rounded-lg text-[10px] h-7"
+                                >
+                                  Approve
+                                </Button>
+                              )}
+                              {onRejectReport && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => { e.stopPropagation(); onRejectReport(report.id); }}
+                                  className="text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2 font-semibold rounded-lg text-[10px] h-7"
+                                >
+                                  Reject
+                                </Button>
+                              )}
+                            </>
                           )}
-                          {onEditReport && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingReportId(report.id);
-                                setEditUpiId(report.upi_id);
-                                setEditAmount(String(report.amount));
-                              }}
-                              className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-2 font-semibold rounded-lg text-[10px] h-7"
-                            >
-                              Edit
-                            </Button>
+                          
+                          {currentSlide === 4 && role === 'team_lead' && (
+                            <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">
+                              Pending Auditor Approval
+                            </span>
                           )}
-                          {onMatchReport && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled={isMatching[report.id]}
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                setIsMatching(prev => ({ ...prev, [report.id]: true }));
-                                const isMatched = await onMatchReport(report.id);
-                                setIsMatching(prev => ({ ...prev, [report.id]: false }));
-                                if (!isMatched) {
-                                  setErrorMessage("This entry did not match any uploaded Admin Excel records.");
-                                  setTimeout(() => setErrorMessage(null), 5000);
-                                }
-                              }}
-                              className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 px-2 font-semibold rounded-lg text-[10px] h-7"
-                            >
-                              {isMatching[report.id] ? "Matching..." : "Match"}
-                            </Button>
+
+                          {currentSlide !== 4 && role === 'team_lead' && (
+                            <>
+                              {onAddRemark && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setRemarkingReportId(report.id);
+                                    setEditRemark(report.details?.admin_remark || "");
+                                  }}
+                                  className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 px-2 font-semibold rounded-lg text-[10px] h-7"
+                                >
+                                  Remark
+                                </Button>
+                              )}
+                              {report.type === 'duplicate_upi' && onResolveReport && (
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (window.confirm("Are you sure you want to resolve and delete this duplicate report?")) {
+                                      onResolveReport(report.id);
+                                    }
+                                  }}
+                                  className="bg-emerald-600/80 hover:bg-emerald-600 text-white px-2 font-semibold rounded-lg text-[10px] h-7"
+                                >
+                                  Resolve
+                                </Button>
+                              )}
+                              {report.type !== 'duplicate_upi' && onEditReport && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingReportId(report.id);
+                                    setEditUpiId(report.upi_id);
+                                    setEditAmount(String(report.amount));
+                                  }}
+                                  className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 px-2 font-semibold rounded-lg text-[10px] h-7"
+                                >
+                                  Edit
+                                </Button>
+                              )}
+                              {report.type === 'missing_in_admin' && onMatchReport && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={isMatching[report.id]}
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    setIsMatching(prev => ({ ...prev, [report.id]: true }));
+                                    const isMatched = await onMatchReport(report.id);
+                                    setIsMatching(prev => ({ ...prev, [report.id]: false }));
+                                    if (!isMatched) {
+                                      setErrorMessage("This entry did not match any uploaded Admin Excel records.");
+                                      setTimeout(() => setErrorMessage(null), 5000);
+                                    }
+                                  }}
+                                  className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 px-2 font-semibold rounded-lg text-[10px] h-7"
+                                >
+                                  {isMatching[report.id] ? "Matching..." : "Match"}
+                                </Button>
+                              )}
+                            </>
                           )}
                         </div>
                       )}
@@ -937,6 +1012,7 @@ export default function AdminReportsTab({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { 
-  ArrowLeft, Upload, AlertTriangle, X, CheckCircle2, Loader2 
+  ArrowLeft, Upload, AlertTriangle, X, CheckCircle2, Loader2, Calendar, ChevronRight
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent } from '../../components/ui/Card';
@@ -11,10 +11,10 @@ import { supabase } from '../../lib/supabase';
 // Modular subcomponents
 import AdminHeader from './components/AdminHeader';
 import ControlModules from './components/ControlModules';
-import AdminManageCounters from './components/AdminManageCounters';
+import AdminCounterManagement from './components/AdminCounterManagement';
 import AdminReportsTab from './components/AdminReportsTab';
 import AdminBacklogTab from './components/AdminBacklogTab';
-import { AddCounterModal, ReportGroupDetailsModal, BatchDetailsModal, DuplicateDetailsModal } from './components/AdminModals';
+import { AddCounterModal, AddAuditorModal, AddTeamLeadModal, EditUserModal, ReportGroupDetailsModal, BatchDetailsModal, DuplicateDetailsModal } from './components/AdminModals';
 
 // Fuzzy synonym matching for Excel columns
 const findHeaderKey = (row: any, synonyms: string[]): string | null => {
@@ -84,9 +84,22 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
 
+  // Add Auditor & Team Lead Dialog State
+  const [auditors, setAuditors] = useState<any[]>([]);
+  const [teamLeads, setTeamLeads] = useState<any[]>([]);
+  const [isAddAuditorOpen, setIsAddAuditorOpen] = useState(false);
+  const [isAddTeamLeadOpen, setIsAddTeamLeadOpen] = useState(false);
+  const [selectedTeamLead, setSelectedTeamLead] = useState('');
+  const [selectedCounters, setSelectedCounters] = useState<string[]>([]);
+
+  // Edit User State
+  const [editingUser, setEditingUser] = useState<any>(null);
+  const [editUsername, setEditUsername] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+
   // Slider State
   const [currentSlide, setCurrentSlide] = useState(0);
-  const slides = ['Missing in Admin', 'Missing in Counter', 'Duplicate Entries', 'Mismatched Amount'];
+  const slides = ['Missing in PhonePe but available in Excellon', 'Missing in Excellon but available in PhonePe', 'Duplicate Entries', 'Mismatched Amount', 'Pending Approvals', 'Team Lead Performance', 'Auditor Performance'];
 
   // Live Excel Upload State (Admin)
   const adminFileInputRef = useRef<HTMLInputElement>(null);
@@ -128,6 +141,11 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   // Selected backlog counter details panel state is removed.
   // Selected duplicate report for details modal
   const [selectedDuplicateReport, setSelectedDuplicateReport] = useState<any | null>(null);
+
+  // Performance slides state
+  const [selectedPerformanceTeamLead, setSelectedPerformanceTeamLead] = useState<string>('');
+  const [selectedPerformanceAuditor, setSelectedPerformanceAuditor] = useState<string>('');
+  const [selectedPerformanceDate, setSelectedPerformanceDate] = useState<string | null>(null);
 
   // Global Dashboard Statistics States
   const [totalDiscrepancies, setTotalDiscrepancies] = useState(0);
@@ -174,23 +192,48 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       setLoading(true);
       const { data, error } = await supabase
         .from('users')
-        .select('*')
-        .eq('role', 'counter')
+        .select(`
+          *,
+          team_lead:users!team_lead_id(id, username)
+        `)
         .order('id', { ascending: true });
 
       if (error) {
-        console.error('Error fetching counters:', error);
+        console.error('Error fetching users:', error);
       } else if (data) {
-        setCounters(data.map((user: any) => ({
+        const countersData = data.filter((u: any) => u.role === 'counter').map((user: any) => ({
           id: user.id,
           name: user.counter_name || user.username,
           username: user.username,
           password: user.password,
           logins: user.logins || 0,
-        })));
+        }));
+        
+        const auditorsData = data.filter((u: any) => u.role === 'auditor').map((user: any) => {
+          const teamLead = data.find((tl: any) => tl.id === user.team_lead_id);
+          return {
+            id: user.id,
+            username: user.username,
+            password: user.password,
+            team_lead: teamLead ? { username: teamLead.username } : null,
+            logins: user.logins || 0,
+          };
+        });
+
+        const teamLeadsData = data.filter((u: any) => u.role === 'team_lead').map((user: any) => ({
+          id: user.id,
+          username: user.username,
+          password: user.password,
+          assigned_counters: user.assigned_counters || [],
+          logins: user.logins || 0,
+        }));
+
+        setCounters(countersData);
+        setAuditors(auditorsData);
+        setTeamLeads(teamLeadsData);
       }
     } catch (err) {
-      console.error('Failed to fetch counters:', err);
+      console.error('Failed to fetch users:', err);
     } finally {
       setLoading(false);
     }
@@ -252,8 +295,11 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
       let query = supabase
         .from('reports')
-        .select('*, users(counter_name, username)')
-        .eq('type', reportType);
+        .select('*, users(counter_name, username)');
+
+      if (currentSlide < 4) {
+        query = query.eq('type', reportType);
+      }
 
       if (reportsFilterDate) {
         query = query.eq('date', reportsFilterDate);
@@ -264,10 +310,19 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       if (error) {
         console.error('Error fetching reports:', error);
       } else {
-        setReportsData(data || []);
+        let activeReports = data || [];
+        
+        if (currentSlide < 4) {
+          activeReports = activeReports.filter((r: any) => !r.details?.status && !r.details?.approval_status);
+        } else if (currentSlide === 4) {
+          activeReports = activeReports.filter((r: any) => r.details?.approval_status);
+        }
+        // For slides 5 & 6 (Performance), we don't filter out resolved/pending since we want to evaluate all historical actions
+
+        setReportsData(activeReports);
         setSelectedReportCounterGroup((prev) => {
           if (!prev) return null;
-          const updatedReports = (data || []).filter((r: any) => r.counter_id === prev.counterId);
+          const updatedReports = activeReports.filter((r: any) => r.counter_id === prev.counterId);
           if (updatedReports.length === 0) return null;
           const updatedTotal = updatedReports.reduce((sum: number, r: any) => sum + Number(r.amount), 0);
           return {
@@ -509,13 +564,13 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           .select('upi_id, details')
           .eq('date', date);
 
-        const preservedState: Record<string, { is_edited?: boolean, is_failed_match?: boolean }> = {};
+        const preservedState: Record<string, any> = {};
         if (existingReports) {
           existingReports.forEach(r => {
-            if (r.details?.is_edited || r.details?.is_failed_match) {
+            if (r.details) {
               preservedState[r.upi_id] = {
-                is_edited: r.details.is_edited,
-                is_failed_match: r.details.is_failed_match
+                ...(preservedState[r.upi_id] || {}),
+                ...r.details
               };
             }
           });
@@ -791,22 +846,137 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     }
   };
 
-  const handleEdit = async (id: number, currentUsername: string) => {
-    const newUsername = prompt("Edit username for " + currentUsername, currentUsername);
-    if (newUsername && newUsername.trim() !== '' && newUsername !== currentUsername) {
+  const openEditModal = (id: number, role: 'counter' | 'auditor' | 'team_lead') => {
+    let user = null;
+    if (role === 'counter') user = counters.find(c => c.id === id);
+    else if (role === 'auditor') user = auditors.find(a => a.id === id);
+    else if (role === 'team_lead') user = teamLeads.find(t => t.id === id);
+
+    if (!user) return;
+    
+    // Set the role artificially if missing so the modal knows what fields to show
+    user = { ...user, role };
+    
+    setEditingUser(user);
+    setEditUsername(user.username);
+    setEditPassword(user.password || '');
+    if (user.role === 'auditor') {
+      setSelectedTeamLead(user.team_lead?.id?.toString() || '');
+    } else if (user.role === 'team_lead') {
+      setSelectedCounters(user.assigned_counters || []);
+    }
+  };
+
+  const handleUpdateUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+
+    try {
+      const updates: any = {
+        username: editUsername,
+        password: editPassword,
+      };
+
+      if (editingUser.role === 'counter') {
+        updates.counter_name = editUsername;
+      } else if (editingUser.role === 'auditor') {
+        updates.team_lead_id = selectedTeamLead || null;
+      } else if (editingUser.role === 'team_lead') {
+        updates.assigned_counters = selectedCounters;
+      }
+
+      const { error } = await supabase
+        .from('users')
+        .update(updates)
+        .eq('id', editingUser.id);
+
+      if (error) {
+        alert('Error updating user: ' + error.message);
+      } else {
+        setEditingUser(null);
+        fetchCounters();
+      }
+    } catch (err) {
+      console.error('Error updating user:', err);
+    }
+  };
+
+  const handleAddAuditorSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newUsername && newPassword) {
       try {
         const { error } = await supabase
           .from('users')
-          .update({ counter_name: newUsername, username: newUsername })
-          .eq('id', id);
+          .insert([{
+            role: 'auditor',
+            username: newUsername,
+            password: newPassword,
+            team_lead_id: selectedTeamLead || null,
+            logins: 0,
+          }]);
 
-        if (error) {
-          alert('Error updating counter: ' + error.message);
-        } else {
+        if (error) alert('Error creating auditor: ' + error.message);
+        else {
+          setIsAddAuditorOpen(false);
+          setNewUsername('');
+          setNewPassword('');
+          setSelectedTeamLead('');
           fetchCounters();
         }
       } catch (err) {
-        console.error('Error editing counter:', err);
+        console.error('Error adding auditor:', err);
+      }
+    }
+  };
+
+  const handleDeleteAuditor = async (id: number) => {
+    if (window.confirm('Are you sure you want to delete this auditor?')) {
+      try {
+        const { error } = await supabase.from('users').delete().eq('id', id);
+        if (error) alert('Error deleting auditor: ' + error.message);
+        else fetchCounters();
+      } catch (err) {
+        console.error('Error deleting auditor:', err);
+      }
+    }
+  };
+
+  const handleAddTeamLeadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newUsername && newPassword) {
+      try {
+        const { error } = await supabase
+          .from('users')
+          .insert([{
+            role: 'team_lead',
+            username: newUsername,
+            password: newPassword,
+            assigned_counters: selectedCounters,
+            logins: 0,
+          }]);
+
+        if (error) alert('Error creating team lead: ' + error.message);
+        else {
+          setIsAddTeamLeadOpen(false);
+          setNewUsername('');
+          setNewPassword('');
+          setSelectedCounters([]);
+          fetchCounters();
+        }
+      } catch (err) {
+        console.error('Error adding team lead:', err);
+      }
+    }
+  };
+
+  const handleDeleteTeamLead = async (id: number) => {
+    if (window.confirm('Are you sure you want to delete this team lead?')) {
+      try {
+        const { error } = await supabase.from('users').delete().eq('id', id);
+        if (error) alert('Error deleting team lead: ' + error.message);
+        else fetchCounters();
+      } catch (err) {
+        console.error('Error deleting team lead:', err);
       }
     }
   };
@@ -1203,9 +1373,17 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       return;
     }
     try {
+      const { data: originalReport } = await supabase
+        .from('reports')
+        .select('*')
+        .eq('id', reportId)
+        .single();
+        
+      const updatedDetails = { ...(originalReport?.details || {}), status: 'resolved' };
+
       const { error } = await supabase
         .from('reports')
-        .delete()
+        .update({ details: updatedDetails })
         .eq('id', reportId);
 
       if (error) {
@@ -1284,7 +1462,17 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       // It's matched if the exact same discrepancy is no longer generated
       const isMatched = !error && (!data || data.length === 0);
       
-      if (!isMatched && data && data.length > 0) {
+      if (isMatched) {
+        await supabase.from('reports').insert([{
+          date: report.date,
+          upi_id: report.upi_id,
+          amount: report.amount,
+          type: report.type,
+          counter_id: report.counter_id,
+          details: { ...report.details, status: 'matched' },
+          is_backlog: report.is_backlog
+        }]);
+      } else if (!isMatched && data && data.length > 0) {
         // The discrepancy still exists. Update the recreated report with is_failed_match: true.
         const recreatedReportId = data[0].id;
         const { data: fetchReq } = await supabase.from('reports').select('details').eq('id', recreatedReportId).single();
@@ -1332,6 +1520,23 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       }
 
       const { data, error } = await remainingQuery;
+      const remainingUpiIds = new Set(data?.map(r => r.upi_id) || []);
+      const matchedReports = selectedReportCounterGroup.reports.filter(r => !remainingUpiIds.has(r.upi_id));
+      
+      if (matchedReports.length > 0) {
+        await supabase.from('reports').insert(
+          matchedReports.map(r => ({
+            date: r.date,
+            upi_id: r.upi_id,
+            amount: r.amount,
+            type: r.type,
+            counter_id: r.counter_id,
+            details: { ...r.details, status: 'matched' },
+            is_backlog: r.is_backlog
+          }))
+        );
+      }
+
       const remainingCount = (!error && data) ? data.length : selectedReportCounterGroup.reports.length;
       
       await fetchReports();
@@ -1485,6 +1690,186 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     setReportsData([]);
   };
 
+  // Performance rendering logic
+  const renderTeamLeadPerformanceSlide = () => {
+    const tl = teamLeads.find(t => t.username === selectedPerformanceTeamLead);
+    
+    // Compute performance data for selected TL
+    const performanceData = selectedPerformanceTeamLead && tl ? reportsData.filter(r => {
+      const actedAt = r.details?.acted_at;
+      if (!actedAt) return false;
+      const counterUsername = r.users?.username || `Counter ${r.counter_id}`;
+      return tl.assigned_counters?.includes(counterUsername);
+    }) : [];
+
+    const totalEntries = performanceData.length;
+    const pendingCount = performanceData.filter(r => r.details?.approval_status).length;
+    const failedCount = performanceData.reduce((acc, r) => acc + (r.details?.rejection_count || 0), 0);
+    
+    const performanceByDate = Object.entries(
+      performanceData.reduce((acc: Record<string, any[]>, r) => {
+        const d = r.details.acted_at.split('T')[0];
+        if (!acc[d]) acc[d] = [];
+        acc[d].push(r);
+        return acc;
+      }, {})
+    ).sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime());
+
+    return (
+      <div className="bg-[#111111] border border-[#222222] rounded-2xl p-6 shadow-2xl min-h-[400px]">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold text-white">Team Lead Performance</h3>
+          <select 
+            value={selectedPerformanceTeamLead} 
+            onChange={e => setSelectedPerformanceTeamLead(e.target.value)}
+            className="bg-[#222222] border border-[#333333] text-white text-sm rounded-lg px-3 py-2 focus:border-cyan-500 focus:outline-none"
+          >
+            <option value="">Select Team Lead...</option>
+            {teamLeads.map(t => (
+              <option key={t.id} value={t.username}>{t.username}</option>
+            ))}
+          </select>
+        </div>
+        
+        {!selectedPerformanceTeamLead ? (
+          <div className="flex items-center justify-center py-20 text-text-secondary">Please select a Team Lead to view their performance.</div>
+        ) : (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-[#151515] border border-[#222222] p-4 rounded-xl flex justify-between items-center">
+                <span className="text-text-secondary text-sm font-medium">Total Actions Taken</span>
+                <span className="text-2xl font-mono font-bold text-white">{totalEntries}</span>
+              </div>
+              <div className="bg-[#151515] border border-amber-500/20 p-4 rounded-xl flex justify-between items-center">
+                <span className="text-amber-400 text-sm font-medium">Pending Approvals</span>
+                <span className="text-2xl font-mono font-bold text-amber-400">{pendingCount}</span>
+              </div>
+              <div className="bg-[#151515] border border-red-500/20 p-4 rounded-xl flex justify-between items-center">
+                <span className="text-red-400 text-sm font-medium">Failed Approvals</span>
+                <span className="text-2xl font-mono font-bold text-red-400">{failedCount}</span>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-lg font-bold text-white mb-4">Work Done Date-Wise</h4>
+              {performanceByDate.length === 0 ? (
+                <p className="text-text-secondary">No recorded actions found.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  {performanceByDate.map(([date, reports]) => (
+                    <div 
+                      key={date} 
+                      onClick={() => setSelectedPerformanceDate(date + '|TL')}
+                      className="bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] hover:border-cyan-500/50 p-4 rounded-xl cursor-pointer transition-colors group flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center">
+                          <Calendar className="w-5 h-5 text-cyan-400" />
+                        </div>
+                        <div>
+                          <p className="text-white font-bold">{new Date(date).toLocaleDateString()}</p>
+                          <p className="text-xs text-text-secondary">{reports.length} Discrepancies Solved</p>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-[#333333] group-hover:text-cyan-400 transition-colors" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderAuditorPerformanceSlide = () => {
+    const auditor = auditors.find(a => a.username === selectedPerformanceAuditor);
+    
+    // Compute performance data for selected Auditor
+    const performanceData = selectedPerformanceAuditor && auditor ? reportsData.filter(r => r.details?.auditor_id === selectedPerformanceAuditor && r.details?.auditor_acted_at) : [];
+
+    const totalActions = performanceData.length;
+    const approvedCount = performanceData.filter(r => r.details?.auditor_action === 'approved').length;
+    const rejectedCount = performanceData.filter(r => r.details?.auditor_action === 'rejected').length;
+    
+    const performanceByDate = Object.entries(
+      performanceData.reduce((acc: Record<string, any[]>, r) => {
+        const d = r.details.auditor_acted_at.split('T')[0];
+        if (!acc[d]) acc[d] = [];
+        acc[d].push(r);
+        return acc;
+      }, {})
+    ).sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime());
+
+    return (
+      <div className="bg-[#111111] border border-[#222222] rounded-2xl p-6 shadow-2xl min-h-[400px]">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold text-white">Auditor Performance</h3>
+          <select 
+            value={selectedPerformanceAuditor} 
+            onChange={e => setSelectedPerformanceAuditor(e.target.value)}
+            className="bg-[#222222] border border-[#333333] text-white text-sm rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none"
+          >
+            <option value="">Select Auditor...</option>
+            {auditors.map(a => (
+              <option key={a.id} value={a.username}>{a.username}</option>
+            ))}
+          </select>
+        </div>
+        
+        {!selectedPerformanceAuditor ? (
+          <div className="flex items-center justify-center py-20 text-text-secondary">Please select an Auditor to view their performance.</div>
+        ) : (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-[#151515] border border-[#222222] p-4 rounded-xl flex justify-between items-center">
+                <span className="text-text-secondary text-sm font-medium">Total Tickets Processed</span>
+                <span className="text-2xl font-mono font-bold text-white">{totalActions}</span>
+              </div>
+              <div className="bg-[#151515] border border-emerald-500/20 p-4 rounded-xl flex justify-between items-center">
+                <span className="text-emerald-400 text-sm font-medium">Approved Tickets</span>
+                <span className="text-2xl font-mono font-bold text-emerald-400">{approvedCount}</span>
+              </div>
+              <div className="bg-[#151515] border border-red-500/20 p-4 rounded-xl flex justify-between items-center">
+                <span className="text-red-400 text-sm font-medium">Rejected Tickets</span>
+                <span className="text-2xl font-mono font-bold text-red-400">{rejectedCount}</span>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-lg font-bold text-white mb-4">Tickets Processed Date-Wise</h4>
+              {performanceByDate.length === 0 ? (
+                <p className="text-text-secondary">No recorded actions found.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  {performanceByDate.map(([date, reports]) => (
+                    <div 
+                      key={date} 
+                      onClick={() => setSelectedPerformanceDate(date + '|Auditor')}
+                      className="bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] hover:border-emerald-500/50 p-4 rounded-xl cursor-pointer transition-colors group flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                          <Calendar className="w-5 h-5 text-emerald-400" />
+                        </div>
+                        <div>
+                          <p className="text-white font-bold">{new Date(date).toLocaleDateString()}</p>
+                          <p className="text-xs text-text-secondary">{reports.length} Tickets</p>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-[#333333] group-hover:text-emerald-400 transition-colors" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-dark-bg text-text-primary p-6 md:p-10 font-sans relative overflow-hidden">
       
@@ -1525,12 +1910,34 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         )}
 
         {activeTab === 'manage' && (
-          <AdminManageCounters
+          <AdminCounterManagement
             counters={counters}
+            auditors={auditors}
+            teamLeads={teamLeads}
             loading={loading}
-            onAddClick={() => setIsAddDialogOpen(true)}
-            onEditClick={handleEdit}
-            onDeleteClick={handleDelete}
+            onAddCounterClick={() => {
+              setNewUsername('');
+              setNewPassword('');
+              setIsAddDialogOpen(true);
+            }}
+            onEditCounterClick={(id) => openEditModal(id, 'counter')}
+            onDeleteCounterClick={handleDelete}
+            onAddAuditorClick={() => {
+              setNewUsername('');
+              setNewPassword('');
+              setSelectedTeamLead('');
+              setIsAddAuditorOpen(true);
+            }}
+            onEditAuditorClick={(id) => openEditModal(id, 'auditor')}
+            onDeleteAuditorClick={handleDeleteAuditor}
+            onAddTeamLeadClick={() => {
+              setNewUsername('');
+              setNewPassword('');
+              setSelectedCounters([]);
+              setIsAddTeamLeadOpen(true);
+            }}
+            onEditTeamLeadClick={(id) => openEditModal(id, 'team_lead')}
+            onDeleteTeamLeadClick={handleDeleteTeamLead}
           />
         )}
 
@@ -1609,11 +2016,14 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             prevSlide={prevSlide}
             onOpenGroupDetails={setSelectedReportCounterGroup}
             groupedReportsByCounter={groupedReportsByCounter}
-            onEditReport={handleEditReport}
             onAddRemark={handleAddRemark}
-            onMatchReport={handleMatchReport}
             onOpenDuplicateDetails={setSelectedDuplicateReport}
             uploadMetrics={uploadMetrics}
+            renderCustomSlide={(idx) => {
+              if (idx === 5) return renderTeamLeadPerformanceSlide();
+              if (idx === 6) return renderAuditorPerformanceSlide();
+              return null;
+            }}
           />
         )}
 
@@ -1651,15 +2061,54 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         onSubmit={handleAddCounterSubmit}
       />
 
+      <AddAuditorModal
+        isOpen={isAddAuditorOpen}
+        onClose={() => setIsAddAuditorOpen(false)}
+        newUsername={newUsername}
+        setNewUsername={setNewUsername}
+        newPassword={newPassword}
+        setNewPassword={setNewPassword}
+        selectedTeamLead={selectedTeamLead}
+        setSelectedTeamLead={setSelectedTeamLead}
+        teamLeads={teamLeads}
+        onSubmit={handleAddAuditorSubmit}
+      />
+
+      <AddTeamLeadModal
+        isOpen={isAddTeamLeadOpen}
+        onClose={() => setIsAddTeamLeadOpen(false)}
+        newUsername={newUsername}
+        setNewUsername={setNewUsername}
+        newPassword={newPassword}
+        setNewPassword={setNewPassword}
+        selectedCounters={selectedCounters}
+        setSelectedCounters={setSelectedCounters}
+        availableCounters={counters}
+        onSubmit={handleAddTeamLeadSubmit}
+      />
+
+      <EditUserModal
+        isOpen={!!editingUser}
+        onClose={() => setEditingUser(null)}
+        user={editingUser}
+        editUsername={editUsername}
+        setEditUsername={setEditUsername}
+        editPassword={editPassword}
+        setEditPassword={setEditPassword}
+        selectedTeamLead={selectedTeamLead}
+        setSelectedTeamLead={setSelectedTeamLead}
+        selectedCounters={selectedCounters}
+        setSelectedCounters={setSelectedCounters}
+        teamLeads={teamLeads}
+        availableCounters={counters}
+        onSubmit={handleUpdateUserSubmit}
+      />
+
       <ReportGroupDetailsModal
         group={selectedReportCounterGroup}
         onClose={() => setSelectedReportCounterGroup(null)}
         reportsFilterDate={reportsFilterDate}
-        onResolveReport={handleResolveReport}
-        onEditReport={handleEditReport}
         onAddRemark={handleAddRemark}
-        onMatchReport={handleMatchReport}
-        onMatchAllReports={handleMatchAllReports}
       />
 
       <BatchDetailsModal
@@ -1676,6 +2125,65 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         onClose={() => setSelectedDuplicateReport(null)}
       />
 
+      {/* Performance Details Modal for Admin Dashboard */}
+      {selectedPerformanceDate && (() => {
+        const [dateStr, roleType] = selectedPerformanceDate.split('|');
+        let title = roleType === 'TL' ? 'Team Lead Actions' : 'Auditor Actions';
+        let records: any[] = [];
+
+        if (roleType === 'TL') {
+          const tl = teamLeads.find(t => t.username === selectedPerformanceTeamLead);
+          if (tl) {
+            records = reportsData.filter(r => r.details?.acted_at?.startsWith(dateStr) && tl.assigned_counters?.includes(r.users?.username || `Counter ${r.counter_id}`));
+          }
+        } else if (roleType === 'Auditor') {
+          records = reportsData.filter(r => r.details?.auditor_acted_at?.startsWith(dateStr) && r.details?.auditor_id === selectedPerformanceAuditor);
+        }
+
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSelectedPerformanceDate(null)} />
+            <div className="relative bg-[#111111] border border-[#222222] rounded-2xl w-full max-w-2xl shadow-2xl p-6 animate-in zoom-in-95 duration-200 max-h-[85vh] flex flex-col">
+              <div className="flex items-center justify-between mb-4 pb-4 border-b border-[#222222]">
+                <div>
+                  <h3 className="text-xl font-bold text-white">{title} on {new Date(dateStr).toLocaleDateString()}</h3>
+                  <p className="text-sm text-text-secondary mt-1">{records.length} tickets processed</p>
+                </div>
+                <button onClick={() => setSelectedPerformanceDate(null)} className="text-text-secondary hover:text-white transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="overflow-y-auto pr-2 space-y-3 flex-1">
+                {records.map((report: any) => (
+                  <div key={report.id} className="bg-[#151515] border border-[#222222] p-4 rounded-xl">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <span className="text-cyan-400 font-mono text-sm font-bold">{report.upi_id}</span>
+                        <p className="text-xs text-text-secondary mt-0.5">Amount: ₹{report.amount}</p>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        report.details?.approval_status ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                        report.details?.status === 'resolved' || report.details?.auditor_action === 'approved' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                        report.details?.status === 'matched' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                        report.details?.auditor_action === 'rejected' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                        'bg-[#222222] text-text-secondary border-[#333333]'
+                      }`}>
+                        {report.details?.approval_status ? 'Pending Approval' : (report.details?.auditor_action || report.details?.status || 'Unknown').toUpperCase()}
+                      </span>
+                    </div>
+                    <div className="text-xs text-text-secondary">
+                      <p>Counter: {report.users?.username || `ID: ${report.counter_id}`}</p>
+                      {report.details?.rejection_count > 0 && (
+                        <p className="text-red-400 mt-1">Rejected {report.details.rejection_count} times</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
