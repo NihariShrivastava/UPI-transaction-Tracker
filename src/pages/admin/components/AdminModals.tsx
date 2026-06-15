@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sparkles, Loader2, Search, AlertTriangle, MessageSquare, CheckCircle } from 'lucide-react';
+import { X, Sparkles, Loader2, Search, AlertTriangle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '../../../components/ui/Table';
@@ -595,10 +595,7 @@ interface DuplicateDetailsModalProps {
 
 export function DuplicateDetailsModal({ 
   report, 
-  onClose,
-  onResolveReport,
-  onAddRemark,
-  role = 'admin'
+  onClose
 }: DuplicateDetailsModalProps) {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);

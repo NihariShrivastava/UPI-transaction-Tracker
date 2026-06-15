@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { LogOut, LayoutDashboard, FileSpreadsheet, Users, Activity, CheckCircle, RefreshCw, X, ArrowLeft, ArrowRight } from 'lucide-react';
+import { LogOut, FileSpreadsheet, Users, Activity, X, ArrowLeft, ArrowRight } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import Logo from '../../components/ui/Logo';
@@ -18,7 +18,7 @@ export default function TeamLeadDashboard({ username, onLogout }: TeamLeadDashbo
   const [currentSlide, setCurrentSlide] = useState(0);
   const slides = ['Missing in PhonePe but available in Excellon', 'Missing in Excellon but available in PhonePe', 'Duplicate Entries', 'Mismatched Amount', 'Pending Approvals'];
 
-  const [loading, setLoading] = useState(true);
+
   const [teamLeadData, setTeamLeadData] = useState<any>(null);
   
   const [reportsData, setReportsData] = useState<any[]>([]);
@@ -37,7 +37,6 @@ export default function TeamLeadDashboard({ username, onLogout }: TeamLeadDashbo
   useEffect(() => {
     const fetchInitData = async () => {
       try {
-        setLoading(true);
         // Get Team Lead info
         const { data: tlData, error: tlErr } = await supabase
           .from('users')
@@ -53,18 +52,11 @@ export default function TeamLeadDashboard({ username, onLogout }: TeamLeadDashbo
 
         // Get total uploads from these counters
         if (counters.length > 0) {
-          const { count: txCount } = await supabase
-            .from('transactions')
-            .select('*', { count: 'exact', head: true })
-            .eq('source', 'counter')
-            .in('counter_name', counters); // Warning: users table uses 'username' for array, transactions might use 'counter_name' or we join
             // Actually transactions has counter_id. Let's get the IDs first.
         }
 
       } catch (err) {
         console.error(err);
-      } finally {
-        setLoading(false);
       }
     };
     fetchInitData();
@@ -137,11 +129,6 @@ export default function TeamLeadDashboard({ username, onLogout }: TeamLeadDashbo
         
         // Update global discrepancy count for this team lead
         if (currentSlide !== 4) {
-           const { count } = await supabase
-            .from('reports')
-            .select('*', { count: 'exact', head: true })
-            .in('counter_id', assignedCounterIds);
-            
            // Can't easily filter jsonb via count without raw sql if we want to exclude status. So let's just do it client side or keep a rough metric.
            // setMetrics(prev => ({ ...prev, totalDiscrepancies: count || 0 }));
         }
@@ -261,10 +248,6 @@ export default function TeamLeadDashboard({ username, onLogout }: TeamLeadDashbo
     }
   };
 
-  const handleMatchAllReports = async (): Promise<{ allMatched: boolean, remainingCount: number }> => {
-     // Match all functionality skipped for simplicity in TL dashboard or implement similarly
-     return { allMatched: false, remainingCount: 0 };
-  };
 
   return (
     <div className="min-h-screen bg-dark-bg text-text-primary overflow-x-hidden selection:bg-purple-500/30 selection:text-white flex flex-col font-sans relative">

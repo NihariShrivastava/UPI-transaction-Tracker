@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { LogOut, LayoutDashboard, FileSpreadsheet, Activity, CheckSquare, XCircle, ShieldCheck, ArrowLeft, ArrowRight, Calendar, X, ChevronRight } from 'lucide-react';
+import { LogOut, Activity, CheckSquare, ShieldCheck, ArrowLeft, ArrowRight, Calendar, X, ChevronRight } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import Logo from '../../components/ui/Logo';
@@ -17,8 +17,7 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
   const [currentSlide, setCurrentSlide] = useState(0);
   const slides = ['Missing in PhonePe but available in Excellon', 'Missing in Excellon but available in PhonePe', 'Duplicate Entries', 'Mismatched Amount', 'Pending Approvals', 'Team Lead Performance'];
 
-  const [loading, setLoading] = useState(true);
-  const [auditorData, setAuditorData] = useState<any>(null);
+
   const [teamLeadData, setTeamLeadData] = useState<any>(null);
   
   const [reportsData, setReportsData] = useState<any[]>([]);
@@ -42,7 +41,6 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
   useEffect(() => {
     const fetchInitData = async () => {
       try {
-        setLoading(true);
         // Get Auditor info
         const { data: aData, error: aErr } = await supabase
           .from('users')
@@ -51,7 +49,7 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
           .single();
 
         if (aErr || !aData) throw new Error('Could not load auditor data');
-        setAuditorData(aData);
+
 
         if (aData.team_lead_id) {
           // Fetch assigned Team Lead
@@ -80,8 +78,6 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
         }
       } catch (err) {
         console.error(err);
-      } finally {
-        setLoading(false);
       }
     };
     fetchInitData();

@@ -1367,45 +1367,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     }
   };
 
-  // Resolve single report discrepancy item
-  const handleResolveReport = async (reportId: number) => {
-    if (!window.confirm("Do you want to resolve this discrepancy?")) {
-      return;
-    }
-    try {
-      const { data: originalReport } = await supabase
-        .from('reports')
-        .select('*')
-        .eq('id', reportId)
-        .single();
-        
-      const updatedDetails = { ...(originalReport?.details || {}), status: 'resolved' };
 
-      const { error } = await supabase
-        .from('reports')
-        .update({ details: updatedDetails })
-        .eq('id', reportId);
-
-      if (error) {
-        alert('Error resolving discrepancy: ' + error.message);
-      } else {
-        setSelectedReportCounterGroup((prev) => {
-          if (!prev) return null;
-          const updatedReports = prev.reports.filter(r => r.id !== reportId);
-          if (updatedReports.length === 0) return null;
-          const updatedTotal = updatedReports.reduce((sum, r) => sum + Number(r.amount), 0);
-          return {
-            ...prev,
-            reports: updatedReports,
-            totalAmount: updatedTotal
-          };
-        });
-        fetchReports();
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
 
   const handleAddRemark = async (reportId: number, remark: string) => {
     try {
@@ -1441,242 +1403,6 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       }
     } catch (err) {
       console.error(err);
-    }
-  };
-
-  const handleMatchReport = async (reportId: number): Promise<boolean> => {
-    try {
-      const report = reportsData.find(r => r.id === reportId);
-      if (!report || !report.date) return false;
-      setReportsLoading(true);
-      await compareTransactionsForDates([report.date]);
-      
-      const { data, error } = await supabase
-        .from('reports')
-        .select('id')
-        .eq('date', report.date)
-        .eq('upi_id', report.upi_id)
-        .eq('amount', report.amount)
-        .eq('type', report.type);
-
-      // It's matched if the exact same discrepancy is no longer generated
-      const isMatched = !error && (!data || data.length === 0);
-      
-      if (isMatched) {
-        await supabase.from('reports').insert([{
-          date: report.date,
-          upi_id: report.upi_id,
-          amount: report.amount,
-          type: report.type,
-          counter_id: report.counter_id,
-          details: { ...report.details, status: 'matched' },
-          is_backlog: report.is_backlog
-        }]);
-      } else if (!isMatched && data && data.length > 0) {
-        // The discrepancy still exists. Update the recreated report with is_failed_match: true.
-        const recreatedReportId = data[0].id;
-        const { data: fetchReq } = await supabase.from('reports').select('details').eq('id', recreatedReportId).single();
-        if (fetchReq) {
-          await supabase.from('reports').update({
-            details: { ...fetchReq.details, is_failed_match: true }
-          }).eq('id', recreatedReportId);
-        }
-      }
-
-      await fetchReports();
-      return isMatched;
-    } catch (err) {
-      console.error(err);
-      return false;
-    } finally {
-      setReportsLoading(false);
-    }
-  };
-
-  const handleMatchAllReports = async (): Promise<{ allMatched: boolean, remainingCount: number }> => {
-    try {
-      if (!selectedReportCounterGroup || !selectedReportCounterGroup.reports) {
-        return { allMatched: false, remainingCount: 0 };
-      }
-      setReportsLoading(true);
-      
-      const uniqueDates = Array.from(new Set(selectedReportCounterGroup.reports.map(r => r.date).filter(Boolean)));
-      if (uniqueDates.length > 0) {
-        await compareTransactionsForDates(uniqueDates as string[]);
-      }
-      
-      // Query remaining for this counter and report type
-      const reportType = currentSlide === 0 ? 'missing_in_admin' : currentSlide === 1 ? 'missing_in_counter' : currentSlide === 2 ? 'duplicate_upi' : 'mismatched_amount';
-      let remainingQuery = supabase
-        .from('reports')
-        .select('id')
-        .in('date', uniqueDates as string[])
-        .eq('type', reportType);
-
-      if (selectedReportCounterGroup.counterId !== null) {
-        remainingQuery = remainingQuery.eq('counter_id', selectedReportCounterGroup.counterId);
-      } else {
-        remainingQuery = remainingQuery.is('counter_id', null);
-      }
-
-      const { data, error } = await remainingQuery;
-      const remainingUpiIds = new Set(data?.map(r => r.upi_id) || []);
-      const matchedReports = selectedReportCounterGroup.reports.filter(r => !remainingUpiIds.has(r.upi_id));
-      
-      if (matchedReports.length > 0) {
-        await supabase.from('reports').insert(
-          matchedReports.map(r => ({
-            date: r.date,
-            upi_id: r.upi_id,
-            amount: r.amount,
-            type: r.type,
-            counter_id: r.counter_id,
-            details: { ...r.details, status: 'matched' },
-            is_backlog: r.is_backlog
-          }))
-        );
-      }
-
-      const remainingCount = (!error && data) ? data.length : selectedReportCounterGroup.reports.length;
-      
-      await fetchReports();
-      return { allMatched: remainingCount === 0, remainingCount };
-    } catch (err) {
-      console.error(err);
-      return { allMatched: false, remainingCount: selectedReportCounterGroup?.reports?.length || 0 };
-    } finally {
-      setReportsLoading(false);
-    }
-  };
-
-  // Edit matching transaction details and update the discrepancy report (leaving resolution manual)
-  const handleEditReport = async (reportId: number, newUpiId: string, newAmount: number) => {
-    try {
-      // 1. Get the original report to find the matching transaction details
-      const { data: originalReport, error: getReportError } = await supabase
-        .from('reports')
-        .select('*')
-        .eq('id', reportId)
-        .single();
-
-      if (getReportError || !originalReport) {
-        alert('Error retrieving report details: ' + (getReportError?.message || 'Report not found'));
-        return;
-      }
-
-      // 2. Identify the transaction source
-      let source = 'counter';
-      if (originalReport.type === 'missing_in_counter') {
-        source = 'admin';
-      } else if (originalReport.type === 'duplicate_upi') {
-        source = originalReport.details?.source || 'counter';
-      }
-
-      // 3. Find the transaction in the transactions table
-      let findTxQuery = supabase
-        .from('transactions')
-        .select('id, upi_id')
-        .eq('source', source);
-
-      if (originalReport.source_id) {
-        findTxQuery = findTxQuery.eq('id', originalReport.source_id);
-      } else {
-        findTxQuery = findTxQuery
-          .eq('upi_id', originalReport.upi_id)
-          .eq('date', originalReport.date);
-          
-        if (source === 'counter' && originalReport.counter_id) {
-          findTxQuery = findTxQuery.eq('counter_id', originalReport.counter_id);
-        }
-      }
-
-      const { data: txs, error: txError } = await findTxQuery;
-
-      if (txError) {
-        console.error('Error finding matching transaction:', txError.message);
-      }
-
-      // 4. Update the transaction in the transactions table if found
-      if (txs && txs.length > 0) {
-        const txIds = txs.map(t => t.id);
-        let finalNewUpiId = newUpiId;
-        
-        // Preserve Store Name and Store ID suffixes for admin transactions
-        if (source === 'admin' && txs[0].upi_id) {
-          const parts = String(txs[0].upi_id).split('|||');
-          if (parts.length > 1) {
-            finalNewUpiId = newUpiId + '|||' + parts.slice(1).join('|||');
-          }
-        }
-        
-        const { error: updateTxError } = await supabase
-          .from('transactions')
-          .update({
-            upi_id: finalNewUpiId,
-            amount: newAmount
-          })
-          .in('id', txIds);
-
-        if (updateTxError) {
-          alert('Error updating transaction details: ' + updateTxError.message);
-          return;
-        }
-      } else {
-        console.warn('Matching transaction not found in database to edit.');
-      }
-
-      // 5. Update report values inside the reports table so it correctly shows updated details
-      const updatedDetails = {
-        ...originalReport.details,
-        is_edited: true,
-        message: originalReport.type === 'missing_in_admin'
-          ? `Cheque Number '${newUpiId}' is available in Counter but missing in Admin sheet.`
-          : originalReport.type === 'missing_in_counter'
-          ? `Transaction UTR '${newUpiId}' is available in Admin but missing from all Counter sheets.`
-          : originalReport.details?.message
-      };
-
-      const { error: updateReportError } = await supabase
-        .from('reports')
-        .update({
-          upi_id: newUpiId,
-          amount: newAmount,
-          details: updatedDetails
-        })
-        .eq('id', reportId);
-
-      if (updateReportError) {
-        alert('Error updating report details: ' + updateReportError.message);
-      } else {
-        // Update local modal state dynamically
-        setSelectedReportCounterGroup((prev) => {
-          if (!prev) return null;
-          const updatedReports = prev.reports.map(r => {
-            if (r.id === reportId) {
-              return {
-                ...r,
-                upi_id: newUpiId,
-                amount: newAmount,
-                details: updatedDetails
-              };
-            }
-            return r;
-          });
-          const updatedTotal = updatedReports.reduce((sum, r) => sum + Number(r.amount), 0);
-          return {
-            ...prev,
-            reports: updatedReports,
-            totalAmount: updatedTotal
-          };
-        });
-        
-        // Refresh all reports and dashboard stats
-        fetchReports();
-        fetchSystemMetrics();
-      }
-    } catch (err: any) {
-      console.error('Error in edit:', err);
-      alert('An unexpected error occurred: ' + err.message);
     }
   };
 
@@ -1756,7 +1482,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                 <p className="text-text-secondary">No recorded actions found.</p>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                  {performanceByDate.map(([date, reports]) => (
+                  {performanceByDate.map(([date, reports]: [string, any]) => (
                     <div 
                       key={date} 
                       onClick={() => setSelectedPerformanceDate(date + '|TL')}
@@ -1787,7 +1513,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     const auditor = auditors.find(a => a.username === selectedPerformanceAuditor);
     
     // Compute performance data for selected Auditor
-    const performanceData = selectedPerformanceAuditor && auditor ? reportsData.filter(r => r.details?.auditor_id === selectedPerformanceAuditor && r.details?.auditor_acted_at) : [];
+    const performanceData = selectedPerformanceAuditor && auditor ? reportsData.filter(r => r.details?.auditor_id === auditor.id && r.details?.auditor_acted_at) : [];
 
     const totalActions = performanceData.length;
     const approvedCount = performanceData.filter(r => r.details?.auditor_action === 'approved').length;
@@ -1843,7 +1569,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                 <p className="text-text-secondary">No recorded actions found.</p>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                  {performanceByDate.map(([date, reports]) => (
+                  {performanceByDate.map(([date, reports]: [string, any]) => (
                     <div 
                       key={date} 
                       onClick={() => setSelectedPerformanceDate(date + '|Auditor')}
