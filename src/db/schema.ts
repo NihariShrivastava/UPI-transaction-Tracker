@@ -6,6 +6,7 @@ export const users = pgTable('users', {
   username: varchar('username', { length: 255 }).notNull().unique(),
   password: text('password').notNull(),
   counter_name: varchar('counter_name', { length: 255 }), // null for admin
+  assigned_team_leads: jsonb('assigned_team_leads'),
   logins: integer('logins').default(0),
 });
 

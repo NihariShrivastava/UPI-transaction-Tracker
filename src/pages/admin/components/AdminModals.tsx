@@ -236,8 +236,10 @@ export function ReportGroupDetailsModal({
                       const isEditing = editingReportId === report.id;
                       const isRemarking = remarkingReportId === report.id;
                       const isEditedAndFailed = report.details?.is_edited === true && report.details?.is_failed_match === true;
+                      const isPending = report.details?.approval_status && report.details?.approval_status !== 'approved';
+                      const isHighlighted = isEditedAndFailed || isPending;
                       return (
-                        <TableRow key={report.id} className={`border-b border-[#222222]/50 transition-colors animate-in slide-in-from-left duration-200 ${isEditedAndFailed ? 'bg-purple-900/30 hover:bg-purple-900/40' : 'hover:bg-[#222222]/20'}`}>
+                        <TableRow key={report.id} className={`border-b border-[#222222]/50 transition-colors animate-in slide-in-from-left duration-200 ${isHighlighted ? 'bg-purple-900/30 hover:bg-purple-900/40' : 'hover:bg-[#222222]/20'}`}>
                           <TableCell className="font-mono text-text-secondary text-xs">{idx + 1}</TableCell>
                           <TableCell className="font-mono text-white font-semibold">
                             {isEditing ? (
@@ -248,7 +250,7 @@ export function ReportGroupDetailsModal({
                                 className="w-full bg-[#000000] border border-purple-500/50 rounded-xl h-9 px-3 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
                               />
                             ) : (
-                              report.upi_id
+                              report.details?.proposed_edit?.upi_id || report.upi_id
                             )}
                           </TableCell>
                           <TableCell className="font-mono text-purple-400 font-bold">
@@ -266,14 +268,14 @@ export function ReportGroupDetailsModal({
                             ) : report.type === 'mismatched_amount' && report.details?.admin_amounts ? (
                               <div className="flex flex-col gap-1">
                                 <span className="text-emerald-400 text-xs bg-emerald-500/10 px-1.5 py-0.5 rounded w-fit">
-                                  Counter: ₹{Number(report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                  Counter: ₹{Number(report.details?.proposed_edit?.amount || report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                                 </span>
                                 <span className="text-red-400 text-xs bg-red-500/10 px-1.5 py-0.5 rounded w-fit">
                                   Admin: ₹{report.details.admin_amounts.map((n: string) => Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2 })).join(', ')}
                                 </span>
                               </div>
                             ) : (
-                              `₹${Number(report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                              `₹${Number(report.details?.proposed_edit?.amount || report.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                             )}
                           </TableCell>
                           <TableCell className="text-xs text-text-secondary">
@@ -737,8 +739,8 @@ interface AddAuditorModalProps {
   setNewUsername: (val: string) => void;
   newPassword: string;
   setNewPassword: (val: string) => void;
-  selectedTeamLead: string;
-  setSelectedTeamLead: (val: string) => void;
+  selectedTeamLeads: string[];
+  setSelectedTeamLeads: (val: string[]) => void;
   teamLeads: any[];
   onSubmit: (e: React.FormEvent) => void;
 }
@@ -750,8 +752,8 @@ export function AddAuditorModal({
   setNewUsername,
   newPassword,
   setNewPassword,
-  selectedTeamLead,
-  setSelectedTeamLead,
+  selectedTeamLeads,
+  setSelectedTeamLeads,
   teamLeads,
   onSubmit
 }: AddAuditorModalProps) {
@@ -791,17 +793,29 @@ export function AddAuditorModal({
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-text-secondary">Team Lead Assigned</label>
-                    <select
-                      value={selectedTeamLead}
-                      onChange={e => setSelectedTeamLead(e.target.value)}
-                      className="w-full bg-[#000000] border border-[#222222] rounded-xl h-11 px-4 text-text-primary focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
-                    >
-                      <option value="">Select Team Lead</option>
+                    <label className="text-sm font-medium text-text-secondary">Team Leads Assigned (Check to select)</label>
+                    <div className="w-full bg-[#000000] border border-[#222222] rounded-xl p-3 text-text-primary h-48 overflow-y-auto flex flex-col gap-2 shadow-inner">
                       {teamLeads.map(tl => (
-                        <option key={tl.id} value={tl.id}>{tl.username}</option>
+                        <label key={tl.id} className="flex items-center gap-3 p-2 hover:bg-[#222222] rounded-lg cursor-pointer transition-colors">
+                          <input 
+                            type="checkbox" 
+                            checked={selectedTeamLeads.includes(tl.username)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedTeamLeads([...selectedTeamLeads, tl.username]);
+                              } else {
+                                setSelectedTeamLeads(selectedTeamLeads.filter(st => st !== tl.username));
+                              }
+                            }}
+                            className="w-4 h-4 rounded border-[#444444] text-emerald-500 focus:ring-emerald-500 bg-[#111111] cursor-pointer"
+                          />
+                          <span className="text-sm font-semibold">{tl.username}</span>
+                        </label>
                       ))}
-                    </select>
+                      {teamLeads.length === 0 && (
+                        <div className="text-sm text-text-secondary italic text-center py-4">No team leads available</div>
+                      )}
+                    </div>
                   </div>
                   <div className="pt-4 flex justify-end gap-3">
                     <Button type="button" variant="ghost" onClick={onClose} className="rounded-xl">Cancel</Button>
@@ -924,8 +938,8 @@ interface EditUserModalProps {
   setEditUsername: (val: string) => void;
   editPassword: string;
   setEditPassword: (val: string) => void;
-  selectedTeamLead: string;
-  setSelectedTeamLead: (val: string) => void;
+  selectedTeamLeads: string[];
+  setSelectedTeamLeads: (val: string[]) => void;
   selectedCounters: string[];
   setSelectedCounters: (val: string[]) => void;
   teamLeads: any[];
@@ -941,8 +955,8 @@ export function EditUserModal({
   setEditUsername,
   editPassword,
   setEditPassword,
-  selectedTeamLead,
-  setSelectedTeamLead,
+  selectedTeamLeads,
+  setSelectedTeamLeads,
   selectedCounters,
   setSelectedCounters,
   teamLeads,
@@ -987,17 +1001,29 @@ export function EditUserModal({
 
                   {user.role === 'auditor' && (
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-text-secondary">Team Lead Assigned</label>
-                      <select
-                        value={selectedTeamLead}
-                        onChange={e => setSelectedTeamLead(e.target.value)}
-                        className="w-full bg-[#000000] border border-[#222222] rounded-xl h-11 px-4 text-text-primary focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
-                      >
-                        <option value="">Select Team Lead</option>
+                      <label className="text-sm font-medium text-text-secondary">Team Leads Assigned (Check to select)</label>
+                      <div className="w-full bg-[#000000] border border-[#222222] rounded-xl p-3 text-text-primary h-48 overflow-y-auto flex flex-col gap-2 shadow-inner">
                         {teamLeads.map(tl => (
-                          <option key={tl.id} value={tl.id}>{tl.username}</option>
+                          <label key={tl.id} className="flex items-center gap-3 p-2 hover:bg-[#222222] rounded-lg cursor-pointer transition-colors">
+                            <input 
+                              type="checkbox" 
+                              checked={selectedTeamLeads.includes(tl.username)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedTeamLeads([...selectedTeamLeads, tl.username]);
+                                } else {
+                                  setSelectedTeamLeads(selectedTeamLeads.filter(st => st !== tl.username));
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-[#444444] text-emerald-500 focus:ring-emerald-500 bg-[#111111] cursor-pointer"
+                            />
+                            <span className="text-sm font-semibold">{tl.username}</span>
+                          </label>
                         ))}
-                      </select>
+                        {teamLeads.length === 0 && (
+                          <div className="text-sm text-text-secondary italic text-center py-4">No team leads available</div>
+                        )}
+                      </div>
                     </div>
                   )}
 

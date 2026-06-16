@@ -207,7 +207,14 @@ export default function TeamLeadDashboard({ username, onLogout }: TeamLeadDashbo
       const { error } = await supabase.from('reports').update({ details: updatedDetails }).eq('id', reportId);
       if (error) throw error;
       
-      setSelectedReportCounterGroup(null);
+      setSelectedReportCounterGroup(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          reports: prev.reports.map(r => r.id === reportId ? { ...r, details: updatedDetails } : r)
+        };
+      });
+
       fetchReports();
     } catch (err) {
       console.error(err);
@@ -227,21 +234,62 @@ export default function TeamLeadDashboard({ username, onLogout }: TeamLeadDashbo
   };
 
   const handleMatchReport = async (reportId: number): Promise<boolean> => {
-    // For Match, we just mark it as matched and send to auditor as pending check
     try {
       const { data: originalReport } = await supabase.from('reports').select('*').eq('id', reportId).single();
-      const updatedDetails = { 
-        ...(originalReport?.details || {}), 
-        status: 'matched', // it's matched immediately 
-        approval_status: 'pending_match_check', // auditor needs to check
-        acted_by: teamLeadData?.id,
-        acted_at: new Date().toISOString()
-      };
+      if (!originalReport) return false;
 
-      const { error } = await supabase.from('reports').update({ details: updatedDetails }).eq('id', reportId);
-      if (error) throw error;
-      fetchReports();
-      return true;
+      // Use proposed edit amount if it exists, otherwise original amount
+      const targetAmount = originalReport.details?.proposed_edit?.amount || originalReport.amount;
+
+      // Verify if there's any admin transaction for this amount and date
+      const { data: adminMatches } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('source', 'admin')
+        .eq('date', originalReport.date)
+        .eq('amount', targetAmount);
+
+      if (adminMatches && adminMatches.length > 0) {
+        const updatedDetails = { 
+          ...(originalReport?.details || {}), 
+          status: 'matched',
+          approval_status: 'pending_match_check',
+          acted_by: teamLeadData?.id,
+          acted_at: new Date().toISOString()
+        };
+
+        const { error } = await supabase.from('reports').update({ details: updatedDetails }).eq('id', reportId);
+        if (error) throw error;
+        
+        setSelectedReportCounterGroup(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            reports: prev.reports.map(r => r.id === reportId ? { ...r, details: updatedDetails } : r)
+          };
+        });
+
+        fetchReports();
+        return true;
+      } else {
+        const updatedDetails = { 
+          ...(originalReport?.details || {}), 
+          is_failed_match: true 
+        };
+        const { error } = await supabase.from('reports').update({ details: updatedDetails }).eq('id', reportId);
+        if (error) throw error;
+
+        setSelectedReportCounterGroup(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            reports: prev.reports.map(r => r.id === reportId ? { ...r, details: updatedDetails } : r)
+          };
+        });
+
+        // DO NOT fetchReports() so it visually stays in the current context but highlights the row
+        return false;
+      }
     } catch (err) {
       console.error(err);
       return false;
@@ -353,15 +401,28 @@ export default function TeamLeadDashboard({ username, onLogout }: TeamLeadDashbo
                       <X className="w-5 h-5" />
                     </button>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {teamLeadData?.assigned_counters?.map((c: string) => (
-                      <span key={c} className="px-3 py-1 bg-[#222222] rounded-md text-sm text-purple-300 border border-[#333333]">{c}</span>
-                    ))}
+                  <div className="max-h-96 overflow-y-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-[#333333]">
+                          <th className="py-2 text-text-secondary font-medium text-sm">Sr. No.</th>
+                          <th className="py-2 text-text-secondary font-medium text-sm">Name of Counter</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {teamLeadData?.assigned_counters?.map((c: string, idx: number) => (
+                          <tr key={c} className="border-b border-[#222222] hover:bg-[#1a1a1a] transition-colors">
+                            <td className="py-3 px-2 text-sm text-text-secondary w-16">{idx + 1}</td>
+                            <td className="py-3 px-2 text-sm font-bold text-purple-300">{c}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                     {(!teamLeadData?.assigned_counters || teamLeadData.assigned_counters.length === 0) && (
-                      <span className="text-text-secondary">No counters assigned.</span>
+                      <div className="py-8 text-text-secondary text-center">No counters assigned.</div>
                     )}
                   </div>
-                  <div className="mt-6 flex justify-end">
+                  <div className="mt-6 flex justify-end pt-4 border-t border-[#222222]">
                     <Button variant="ghost" onClick={() => setShowCountersModal(false)}>Close</Button>
                   </div>
                 </div>
@@ -383,8 +444,17 @@ export default function TeamLeadDashboard({ username, onLogout }: TeamLeadDashbo
             <AdminReportsTab
               currentSlide={currentSlide}
               slides={slides}
-              nextSlide={() => setCurrentSlide(c => (c + 1) % slides.length)}
-              prevSlide={() => setCurrentSlide(c => (c - 1 + slides.length) % slides.length)}
+              hiddenSlides={[1]}
+              nextSlide={() => setCurrentSlide(c => {
+                let next = (c + 1) % slides.length;
+                if (next === 1) next = 2;
+                return next;
+              })}
+              prevSlide={() => setCurrentSlide(c => {
+                let prev = (c - 1 + slides.length) % slides.length;
+                if (prev === 1) prev = 0;
+                return prev;
+              })}
               reportsData={reportsData}
               reportsLoading={reportsLoading}
               reportsFilterDate={reportsFilterDate}

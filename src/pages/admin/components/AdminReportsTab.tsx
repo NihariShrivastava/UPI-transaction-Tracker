@@ -30,6 +30,8 @@ interface AdminReportsTabProps {
   onApproveReport?: (id: number) => Promise<void>;
   onRejectReport?: (id: number) => Promise<void>;
   renderCustomSlide?: (slideIndex: number) => React.ReactNode;
+  hiddenSlides?: number[];
+  teamLeadsData?: any[];
 }
 
 export default function AdminReportsTab({
@@ -52,7 +54,9 @@ export default function AdminReportsTab({
   role = 'admin',
   onApproveReport,
   onRejectReport,
-  renderCustomSlide
+  renderCustomSlide,
+  hiddenSlides,
+  teamLeadsData
 }: AdminReportsTabProps) {
   const reportsDateInputRef = useRef<HTMLInputElement>(null);
   const [tempFilterDate, setTempFilterDate] = useState(reportsFilterDate);
@@ -70,6 +74,13 @@ export default function AdminReportsTab({
   const [isMatching, setIsMatching] = useState<{ [key: number]: boolean }>({});
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [globalSearch, setGlobalSearch] = useState('');
+  
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 12;
+  
+  const [selectedTeamLeadFilter, setSelectedTeamLeadFilter] = useState<string[]>([]);
+  const [isTeamLeadFilterOpen, setIsTeamLeadFilterOpen] = useState(false);
 
   const filteredGroupedReportsByCounter = useMemo(() => {
     if (!globalSearch.trim()) return groupedReportsByCounter;
@@ -109,6 +120,10 @@ export default function AdminReportsTab({
   useEffect(() => {
     setTempFilterDate(reportsFilterDate);
   }, [reportsFilterDate]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [currentSlide, globalSearch, selectedCounterFilter, selectedStoreFilter, selectedTeamLeadFilter]);
 
   const handleNextSlide = () => {
     nextSlide();
@@ -250,8 +265,21 @@ export default function AdminReportsTab({
   }, [reportsData, currentSlide]);
 
   const uniqueCountersForFilter = useMemo(() => {
-    return Array.from(new Set(groupedReportsByCounter.map(g => g.username))).filter(Boolean);
-  }, [groupedReportsByCounter]);
+    let all: string[] = [];
+    if (currentSlide === 0) {
+      all = groupedReportsByCounter.map(g => g.username);
+    } else if (currentSlide === 2 || currentSlide === 3 || currentSlide === 4) {
+      all = reportsData.map(r => r.users?.username || r.users?.counter_name || r.details?.counter_name || `Counter ${r.counter_id || 'Unknown'}`);
+    }
+    return Array.from(new Set(all)).filter(Boolean).sort();
+  }, [currentSlide, groupedReportsByCounter, reportsData]);
+
+  const uniqueTeamLeadsForFilter = useMemo(() => {
+    if (role === 'auditor' && teamLeadsData) {
+      return teamLeadsData.map(tl => tl.username).sort();
+    }
+    return [];
+  }, [role, teamLeadsData, currentSlide]);
 
   const uniqueStoresForFilter = useMemo(() => {
     return Array.from(new Set(groupedMissingInCounter.map((g: any) => g.storeName))).filter(Boolean);
@@ -331,12 +359,15 @@ export default function AdminReportsTab({
             {slides[currentSlide]}
           </h2>
           <div className="flex gap-1.5">
-            {slides.map((_, index) => (
-              <div 
-                key={index} 
-                className={`h-1.5 rounded-full transition-all duration-300 ${currentSlide === index ? 'w-6 bg-purple-500' : 'w-1.5 bg-[#333333]'}`}
-              />
-            ))}
+            {slides.map((_, index) => {
+              if (hiddenSlides?.includes(index)) return null;
+              return (
+                <div 
+                  key={index} 
+                  className={`h-1.5 rounded-full transition-all duration-300 ${currentSlide === index ? 'w-6 bg-purple-500' : 'w-1.5 bg-[#333333]'}`}
+                />
+              );
+            })}
           </div>
         </div>
 
@@ -421,7 +452,7 @@ export default function AdminReportsTab({
               Apply
             </Button>
 
-            {(reportsFilterDate || selectedCounterFilter.length > 0 || selectedStoreFilter.length > 0) && (
+            {(reportsFilterDate || selectedCounterFilter.length > 0 || selectedStoreFilter.length > 0 || selectedTeamLeadFilter.length > 0) && (
               <Button
                 onClick={handleClearDate}
                 variant="ghost"
@@ -431,7 +462,58 @@ export default function AdminReportsTab({
               </Button>
             )}
 
-            {(currentSlide === 0 || currentSlide === 3) && uniqueCountersForFilter.length > 0 && (
+            {role === 'auditor' && currentSlide === 4 && uniqueTeamLeadsForFilter.length > 0 && (
+              <div className="relative ml-2 z-50">
+                <Button 
+                  onClick={() => setIsTeamLeadFilterOpen(!isTeamLeadFilterOpen)}
+                  variant="secondary" 
+                  className="bg-[#000000] border border-[#222222] text-xs h-[34px] rounded-xl text-white px-3 focus:border-purple-500 hover:border-purple-500/50 flex items-center gap-1"
+                >
+                  <span>{selectedTeamLeadFilter.length > 0 ? `${selectedTeamLeadFilter.length} Team Leads Selected` : 'All Team Leads'}</span>
+                  {isTeamLeadFilterOpen ? <ChevronUp className="w-3.5 h-3.5 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 shrink-0" />}
+                </Button>
+                
+                {isTeamLeadFilterOpen && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setIsTeamLeadFilterOpen(false)}
+                    />
+                    <div className="absolute top-full left-0 mt-2 w-64 bg-[#111111] border border-[#222222] rounded-xl shadow-2xl z-50 max-h-60 overflow-y-auto p-2">
+                      <label className="flex items-center gap-2 p-2 hover:bg-[#222222] rounded-lg cursor-pointer transition-colors">
+                        <input 
+                          type="checkbox" 
+                          checked={selectedTeamLeadFilter.length === 0}
+                          onChange={() => setSelectedTeamLeadFilter([])}
+                          className="rounded border-[#333333] bg-[#000000] text-purple-500 focus:ring-purple-500"
+                        />
+                        <span className="text-xs text-white font-semibold">All Team Leads</span>
+                      </label>
+                      <div className="h-px bg-[#222222] my-1" />
+                      {uniqueTeamLeadsForFilter.map((tl: any) => (
+                        <label key={tl} className="flex items-center gap-2 p-2 hover:bg-[#222222] rounded-lg cursor-pointer transition-colors">
+                          <input 
+                            type="checkbox" 
+                            checked={selectedTeamLeadFilter.includes(tl)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedTeamLeadFilter([...selectedTeamLeadFilter, tl]);
+                              } else {
+                                setSelectedTeamLeadFilter(selectedTeamLeadFilter.filter(x => x !== tl));
+                              }
+                            }}
+                            className="rounded border-[#333333] bg-[#000000] text-purple-500 focus:ring-purple-500 shrink-0"
+                          />
+                          <span className="text-xs text-white truncate" title={tl}>{tl}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {(currentSlide === 0 || currentSlide === 2 || currentSlide === 3 || currentSlide === 4) && uniqueCountersForFilter.length > 0 && (
               <div className="relative ml-2 z-50">
                 <Button 
                   onClick={() => setIsCounterFilterOpen(!isCounterFilterOpen)}
@@ -613,26 +695,78 @@ export default function AdminReportsTab({
           </div>
         ) : (
           <div>
-            {(currentSlide === 1 || currentSlide === 2 || currentSlide === 4) && (
-              <div className="mb-6 p-4 bg-[#151515] border border-[#222222] rounded-2xl flex items-center justify-between shadow-md animate-in fade-in duration-300">
-                <span className="text-xs text-text-secondary font-medium">
-                  Total {currentSlide === 4 ? 'Pending Approvals' : 'Discrepancies'} Count:
-                </span>
-                <span className={`px-3 py-1 rounded-full text-xs font-extrabold border ${
-                  currentSlide === 1 ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' : 
-                  currentSlide === 4 ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' : 
-                  'bg-orange-500/10 text-orange-400 border-orange-500/20'
-                }`}>
-                  {filteredReportsData.length} entries
-                </span>
-              </div>
-            )}
-            {(currentSlide === 0 || currentSlide === 3) ? (
-              /* Slide 0 & 3: Grouped by Counter Cards */
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
-                {filteredGroupedReportsByCounter
-                .filter(g => selectedCounterFilter.length === 0 || selectedCounterFilter.includes(g.username))
-                .map((group, idx) => (
+            <div className="mb-6 p-4 bg-[#151515] border border-[#222222] rounded-2xl flex items-center justify-between shadow-md animate-in fade-in duration-300">
+              <span className="text-xs text-text-secondary font-medium">
+                Total {currentSlide === 4 ? 'Pending Approvals' : 'Discrepancies'} Count:
+              </span>
+              <span className={`px-3 py-1 rounded-full text-xs font-extrabold border ${
+                currentSlide === 1 ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' : 
+                currentSlide === 4 ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' : 
+                'bg-orange-500/10 text-orange-400 border-orange-500/20'
+              }`}>
+                {(currentSlide === 0 || currentSlide === 3) 
+                  ? filteredGroupedReportsByCounter.filter(g => selectedCounterFilter.length === 0 || selectedCounterFilter.includes(g.username)).reduce((sum, g) => sum + g.reports.length, 0)
+                  : filteredReportsData.filter((report) => {
+                      if (currentSlide === 1 && selectedStoreFilter.length > 0) return selectedStoreFilter.includes(report.details?.admin_store_name || 'Unassigned Mismatches');
+                      if ((currentSlide === 2 || currentSlide === 4) && selectedCounterFilter.length > 0) return selectedCounterFilter.includes(report.users?.username || report.users?.counter_name || report.details?.counter_name || `Counter ${report.counter_id || 'Unknown'}`);
+                      if (role === 'auditor' && currentSlide === 4 && selectedTeamLeadFilter.length > 0 && teamLeadsData) {
+                        const cName = report.users?.username || report.users?.counter_name || report.details?.counter_name || `Counter ${report.counter_id || 'Unknown'}`;
+                        const isValidTL = teamLeadsData.some(tl => 
+                          selectedTeamLeadFilter.includes(tl.username) && 
+                          tl.assigned_counters?.includes(cName)
+                        );
+                        if (!isValidTL) return false;
+                      }
+                      return true;
+                    }).length
+                } entries
+              </span>
+            </div>
+            
+            {(() => {
+              const isGrouped = currentSlide === 0 || currentSlide === 3;
+              
+              let finalData: any[] = [];
+              if (isGrouped) {
+                finalData = filteredGroupedReportsByCounter.filter(g => selectedCounterFilter.length === 0 || selectedCounterFilter.includes(g.username));
+              } else {
+                finalData = filteredReportsData
+                  .filter((report) => {
+                    if (currentSlide === 1 && selectedStoreFilter.length > 0) {
+                      const storeName = report.details?.admin_store_name || 'Unassigned Mismatches';
+                      return selectedStoreFilter.includes(storeName);
+                    }
+                    if ((currentSlide === 2 || currentSlide === 4) && selectedCounterFilter.length > 0) {
+                      const cName = report.users?.username || report.users?.counter_name || report.details?.counter_name || `Counter ${report.counter_id || 'Unknown'}`;
+                      if (!selectedCounterFilter.includes(cName)) return false;
+                    }
+                    if (role === 'auditor' && currentSlide === 4 && selectedTeamLeadFilter.length > 0 && teamLeadsData) {
+                      const cName = report.users?.username || report.users?.counter_name || report.details?.counter_name || `Counter ${report.counter_id || 'Unknown'}`;
+                      const isValidTL = teamLeadsData.some(tl => 
+                        selectedTeamLeadFilter.includes(tl.username) && 
+                        tl.assigned_counters?.includes(cName)
+                      );
+                      if (!isValidTL) return false;
+                    }
+                    return true;
+                  })
+                  .sort((a, b) => {
+                    const aEdited = a.details?.is_edited === true;
+                    const bEdited = b.details?.is_edited === true;
+                    if (aEdited && !bEdited) return -1;
+                    if (!aEdited && bEdited) return 1;
+                    return 0;
+                  });
+              }
+
+              const totalPages = Math.ceil(finalData.length / itemsPerPage);
+              const paginatedData = finalData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+              return (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
+                    {isGrouped ? (
+                      paginatedData.map((group, idx) => (
                 <motion.div
                   key={`${group.counterId || 'unknown'}_${idx}`}
                   initial={{ opacity: 0, y: 15 }}
@@ -672,27 +806,9 @@ export default function AdminReportsTab({
                     </span>
                   </div>
                 </motion.div>
-              ))}
-              </div>
-            ) : (
-              /* Slide 1, 2, 4: Render individual cards */
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
-                {filteredReportsData
-                  .filter((report) => {
-                    if (currentSlide === 1 && selectedStoreFilter.length > 0) {
-                      const storeName = report.details?.admin_store_name || 'Unassigned Mismatches';
-                      return selectedStoreFilter.includes(storeName);
-                    }
-                    return true;
-                  })
-                  .sort((a, b) => {
-                    const aEdited = a.details?.is_edited === true;
-                    const bEdited = b.details?.is_edited === true;
-                    if (aEdited && !bEdited) return -1;
-                    if (!aEdited && bEdited) return 1;
-                    return 0;
-                  })
-                  .map((report) => {
+                      ))
+                    ) : (
+                      paginatedData.map((report) => {
                   const isEditing = editingReportId === report.id;
                   const isRemarking = remarkingReportId === report.id;
                   const isEditedAndFailed = report.details?.is_edited === true && report.details?.is_failed_match === true;
@@ -719,9 +835,16 @@ export default function AdminReportsTab({
 
                     <div>
                       <div className="flex items-center justify-between mb-4">
-                        <span className="text-xs font-mono text-text-secondary truncate max-w-[150px]">
-                          Ref: {report.upi_id}
-                        </span>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-mono text-text-secondary truncate max-w-[150px]">
+                            Ref: {report.upi_id}
+                          </span>
+                          {currentSlide === 4 && (
+                            <span className="text-[10px] text-text-secondary font-semibold mt-0.5">
+                              Counter: {report.users?.username || `ID ${report.counter_id}`}
+                            </span>
+                          )}
+                        </div>
                         <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                           report.type === 'missing_in_counter' 
                             ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
@@ -1006,9 +1129,72 @@ export default function AdminReportsTab({
                     </div>
                   </motion.div>
                   );
-                })}
-              </div>
-            )}
+                })
+              )}
+            </div>
+              
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-8 pt-6 border-t border-[#222222]">
+                  <div className="text-xs text-text-secondary font-medium">
+                    Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, finalData.length)} of {finalData.length} entries
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Button 
+                      variant="secondary" 
+                      size="sm"
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      className="bg-[#1a1a1a] border border-[#333333] hover:bg-[#222222] text-text-secondary hover:text-white disabled:opacity-50 h-8 px-3 rounded-lg"
+                    >
+                      Prev
+                    </Button>
+                    <div className="flex items-center gap-1 mx-1 hidden sm:flex">
+                      {Array.from({ length: totalPages }).map((_, i) => {
+                        // Show max 5 page buttons
+                        if (
+                          totalPages <= 5 || 
+                          i === 0 || 
+                          i === totalPages - 1 || 
+                          (i >= currentPage - 2 && i <= currentPage)
+                        ) {
+                          return (
+                            <button
+                              key={i}
+                              onClick={() => setCurrentPage(i + 1)}
+                              className={`w-8 h-8 rounded-lg text-xs font-bold flex items-center justify-center transition-all ${
+                                currentPage === i + 1 
+                                  ? 'bg-purple-600 text-white shadow-[0_0_10px_rgba(147,51,234,0.3)] border border-purple-500/50' 
+                                  : 'bg-transparent text-text-secondary hover:bg-[#222222] hover:text-white border border-transparent'
+                              }`}
+                            >
+                              {i + 1}
+                            </button>
+                          );
+                        } else if (
+                          (i === 1 && currentPage > 3) || 
+                          (i === totalPages - 2 && currentPage < totalPages - 2)
+                        ) {
+                          return <span key={i} className="text-text-secondary text-xs px-1">...</span>;
+                        }
+                        return null;
+                      })}
+                    </div>
+                    <Button 
+                      variant="secondary" 
+                      size="sm"
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      className="bg-[#1a1a1a] border border-[#333333] hover:bg-[#222222] text-text-secondary hover:text-white disabled:opacity-50 h-8 px-3 rounded-lg"
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
           </div>
         )}
       </div>

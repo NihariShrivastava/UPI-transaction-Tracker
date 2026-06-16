@@ -89,7 +89,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const [teamLeads, setTeamLeads] = useState<any[]>([]);
   const [isAddAuditorOpen, setIsAddAuditorOpen] = useState(false);
   const [isAddTeamLeadOpen, setIsAddTeamLeadOpen] = useState(false);
-  const [selectedTeamLead, setSelectedTeamLead] = useState('');
+  const [selectedTeamLeads, setSelectedTeamLeads] = useState<string[]>([]);
   const [selectedCounters, setSelectedCounters] = useState<string[]>([]);
 
   // Edit User State
@@ -210,12 +210,11 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         }));
         
         const auditorsData = data.filter((u: any) => u.role === 'auditor').map((user: any) => {
-          const teamLead = data.find((tl: any) => tl.id === user.team_lead_id);
           return {
             id: user.id,
             username: user.username,
             password: user.password,
-            team_lead: teamLead ? { username: teamLead.username } : null,
+            assigned_team_leads: user.assigned_team_leads || [],
             logins: user.logins || 0,
           };
         });
@@ -861,7 +860,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     setEditUsername(user.username);
     setEditPassword(user.password || '');
     if (user.role === 'auditor') {
-      setSelectedTeamLead(user.team_lead?.id?.toString() || '');
+      setSelectedTeamLeads(user.assigned_team_leads || []);
     } else if (user.role === 'team_lead') {
       setSelectedCounters(user.assigned_counters || []);
     }
@@ -880,7 +879,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       if (editingUser.role === 'counter') {
         updates.counter_name = editUsername;
       } else if (editingUser.role === 'auditor') {
-        updates.team_lead_id = selectedTeamLead || null;
+        updates.assigned_team_leads = selectedTeamLeads;
       } else if (editingUser.role === 'team_lead') {
         updates.assigned_counters = selectedCounters;
       }
@@ -911,7 +910,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             role: 'auditor',
             username: newUsername,
             password: newPassword,
-            team_lead_id: selectedTeamLead || null,
+            assigned_team_leads: selectedTeamLeads,
             logins: 0,
           }]);
 
@@ -920,7 +919,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           setIsAddAuditorOpen(false);
           setNewUsername('');
           setNewPassword('');
-          setSelectedTeamLead('');
+          setSelectedTeamLeads([]);
           fetchCounters();
         }
       } catch (err) {
@@ -1651,7 +1650,7 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             onAddAuditorClick={() => {
               setNewUsername('');
               setNewPassword('');
-              setSelectedTeamLead('');
+              setSelectedTeamLeads([]);
               setIsAddAuditorOpen(true);
             }}
             onEditAuditorClick={(id) => openEditModal(id, 'auditor')}
@@ -1794,8 +1793,8 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         setNewUsername={setNewUsername}
         newPassword={newPassword}
         setNewPassword={setNewPassword}
-        selectedTeamLead={selectedTeamLead}
-        setSelectedTeamLead={setSelectedTeamLead}
+        selectedTeamLeads={selectedTeamLeads}
+        setSelectedTeamLeads={setSelectedTeamLeads}
         teamLeads={teamLeads}
         onSubmit={handleAddAuditorSubmit}
       />
@@ -1821,8 +1820,8 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         setEditUsername={setEditUsername}
         editPassword={editPassword}
         setEditPassword={setEditPassword}
-        selectedTeamLead={selectedTeamLead}
-        setSelectedTeamLead={setSelectedTeamLead}
+        selectedTeamLeads={selectedTeamLeads}
+        setSelectedTeamLeads={setSelectedTeamLeads}
         selectedCounters={selectedCounters}
         setSelectedCounters={setSelectedCounters}
         teamLeads={teamLeads}

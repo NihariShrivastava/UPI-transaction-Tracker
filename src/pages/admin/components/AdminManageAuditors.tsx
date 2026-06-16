@@ -77,7 +77,9 @@ export default function AdminManageAuditors({
                   <TableCell className="font-semibold text-white">{auditor.username}</TableCell>
                   <TableCell className="text-text-secondary font-mono tracking-wider">{auditor.password}</TableCell>
                   <TableCell className="text-text-secondary font-semibold">
-                    {auditor.team_lead?.username || 'None'}
+                    {auditor.assigned_team_leads && auditor.assigned_team_leads.length > 0 
+                      ? auditor.assigned_team_leads.join(', ') 
+                      : 'None'}
                   </TableCell>
                   <TableCell className="text-center">
                     <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-[#222222] text-sm font-semibold text-emerald-400 border border-[#333333]">

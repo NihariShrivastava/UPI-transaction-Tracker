@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { LogOut, Activity, CheckSquare, ShieldCheck, ArrowLeft, ArrowRight, Calendar, X, ChevronRight } from 'lucide-react';
+import { LogOut, Activity, CheckSquare, ShieldCheck, ArrowLeft, ArrowRight, Calendar, X, ChevronRight, Users } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import Logo from '../../components/ui/Logo';
@@ -14,11 +14,11 @@ interface AuditorDashboardProps {
 
 export default function AuditorDashboard({ username, onLogout }: AuditorDashboardProps) {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'reports'>('dashboard');
-  const [currentSlide, setCurrentSlide] = useState(0);
+  const [currentSlide, setCurrentSlide] = useState(4);
   const slides = ['Missing in PhonePe but available in Excellon', 'Missing in Excellon but available in PhonePe', 'Duplicate Entries', 'Mismatched Amount', 'Pending Approvals', 'Team Lead Performance'];
 
 
-  const [teamLeadData, setTeamLeadData] = useState<any>(null);
+  const [teamLeadsData, setTeamLeadsData] = useState<any[]>([]);
   
   const [reportsData, setReportsData] = useState<any[]>([]);
   const [reportsLoading, setReportsLoading] = useState(false);
@@ -29,13 +29,17 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
   const [metrics, setMetrics] = useState({
     workDoneToday: 0,
     pendingApprovals: 0,
-    teamLeadName: 'None'
+    teamLeadNames: 'None',
+    teamLeadIds: [] as number[]
   });
 
   const [assignedCounterIds, setAssignedCounterIds] = useState<number[]>([]);
   const [performanceData, setPerformanceData] = useState<any[]>([]);
   const [performanceLoading, setPerformanceLoading] = useState(false);
   const [selectedPerformanceDate, setSelectedPerformanceDate] = useState<string | null>(null);
+
+  const [showTeamLeadsModal, setShowTeamLeadsModal] = useState(false);
+  const [activeTeamLeadSlide, setActiveTeamLeadSlide] = useState(0);
 
   // 1. Fetch Auditor Data & Team Lead Data
   useEffect(() => {
@@ -51,24 +55,37 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
         if (aErr || !aData) throw new Error('Could not load auditor data');
 
 
-        if (aData.team_lead_id) {
-          // Fetch assigned Team Lead
-          const { data: tlData } = await supabase
+        if (aData.assigned_team_leads && aData.assigned_team_leads.length > 0) {
+          // Fetch assigned Team Leads by username
+          const { data: tlDataArray } = await supabase
             .from('users')
             .select('*')
-            .eq('id', aData.team_lead_id)
-            .single();
+            .in('username', aData.assigned_team_leads);
 
-          if (tlData) {
-            setTeamLeadData(tlData);
-            setMetrics(prev => ({ ...prev, teamLeadName: tlData.username }));
+          if (tlDataArray && tlDataArray.length > 0) {
+            setTeamLeadsData(tlDataArray);
+            setMetrics(prev => ({ 
+              ...prev, 
+              teamLeadNames: tlDataArray.map(tl => tl.username).join(', '),
+              teamLeadIds: tlDataArray.map(tl => tl.id)
+            }));
             
-            // Fetch Counters assigned to this Team Lead
-            if (tlData.assigned_counters && tlData.assigned_counters.length > 0) {
+            // Fetch Counters assigned to all these Team Leads
+            let allAssignedCounters: string[] = [];
+            tlDataArray.forEach(tl => {
+              if (tl.assigned_counters && tl.assigned_counters.length > 0) {
+                allAssignedCounters = [...allAssignedCounters, ...tl.assigned_counters];
+              }
+            });
+            
+            // Deduplicate counters
+            allAssignedCounters = Array.from(new Set(allAssignedCounters));
+
+            if (allAssignedCounters.length > 0) {
               const { data: cData } = await supabase
                 .from('users')
                 .select('id')
-                .in('username', tlData.assigned_counters);
+                .in('username', allAssignedCounters);
               
               if (cData) {
                 setAssignedCounterIds(cData.map(c => c.id));
@@ -131,9 +148,8 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
     fetchReports();
   }, [currentSlide, reportsFilterDate, assignedCounterIds]);
 
-  // Fetch Work Done Metrics
   useEffect(() => {
-    if (assignedCounterIds.length === 0 || !teamLeadData) return;
+    if (assignedCounterIds.length === 0 || teamLeadsData.length === 0) return;
     
     const fetchMetrics = async () => {
       // Work Done Today = Reports that have status = 'resolved' or 'matched', or approval_status set, 
@@ -155,7 +171,7 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
           if (r.details?.approval_status) {
             pendingCount++;
           }
-          if (r.details?.acted_by === teamLeadData.id && r.details?.acted_at >= todayStr) {
+          if (r.details?.acted_by && metrics.teamLeadIds.includes(r.details.acted_by) && r.details?.acted_at >= todayStr) {
             workDoneCount++;
           }
         });
@@ -168,11 +184,11 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
       }
     };
     fetchMetrics();
-  }, [assignedCounterIds, teamLeadData, reportsData]); // Refresh metrics when reports change
+  }, [assignedCounterIds, teamLeadsData, reportsData, metrics.teamLeadIds]); // Refresh metrics when reports change
 
   // Fetch Analytics for Performance Slide
   useEffect(() => {
-    if (currentSlide !== 5 || assignedCounterIds.length === 0 || !teamLeadData) return;
+    if (currentSlide !== 5 || assignedCounterIds.length === 0 || teamLeadsData.length === 0) return;
     
     const fetchAnalytics = async () => {
       try {
@@ -186,7 +202,7 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
         if (error) throw error;
         
         const analytics = data?.filter(r => 
-          r.details?.acted_by === teamLeadData.id || 
+          (r.details?.acted_by && metrics.teamLeadIds.includes(r.details.acted_by)) || 
           r.details?.rejection_count > 0 || 
           r.details?.status === 'resolved' || 
           r.details?.status === 'matched'
@@ -200,7 +216,7 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
       }
     };
     fetchAnalytics();
-  }, [currentSlide, assignedCounterIds, teamLeadData]);
+  }, [currentSlide, assignedCounterIds, teamLeadsData, metrics.teamLeadIds]);
 
   const groupedReportsByCounter = useMemo(() => {
     if (currentSlide !== 0 && currentSlide !== 3 && currentSlide !== 4) return [];
@@ -415,7 +431,7 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
                     Hello, <span className="text-cyan-400">{username}</span> 👋
                   </h2>
                   <p className="text-text-secondary max-w-lg leading-relaxed">
-                    Welcome to the Auditor workspace. You are currently overseeing Team Lead <span className="text-cyan-300 font-bold">{metrics.teamLeadName}</span> across <span className="text-cyan-300 font-bold">{assignedCounterIds.length}</span> counters.
+                    Welcome to the Auditor workspace. You are currently overseeing Team Leads <span className="text-cyan-300 font-bold">{metrics.teamLeadNames}</span> across <span className="text-cyan-300 font-bold">{assignedCounterIds.length}</span> counters.
                   </p>
                 </div>
               </div>
@@ -436,33 +452,22 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
                 </CardContent>
               </Card>
 
-              <Card className="bg-[#111111]/80 backdrop-blur-xl border-[#222222] hover:border-amber-500/50 transition-all duration-300">
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center border border-amber-500/30">
-                      <Activity className="w-6 h-6 text-amber-400" />
-                    </div>
-                    <div>
-                      <p className="text-sm text-text-secondary font-medium">Pending Approvals</p>
-                      <h3 className="text-3xl font-bold text-white font-mono mt-1">{metrics.pendingApprovals}</h3>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
               <Card 
-                className="group bg-[#111111]/80 backdrop-blur-xl border-[#222222] hover:border-cyan-500/50 transition-all duration-300 cursor-pointer flex flex-col justify-center"
-                onClick={() => setActiveTab('reports')}
+                className="group bg-[#111111]/80 backdrop-blur-xl border-[#222222] hover:border-amber-500/50 transition-all duration-300 cursor-pointer flex flex-col justify-center"
+                onClick={() => {
+                  setCurrentSlide(4);
+                  setActiveTab('reports');
+                }}
               >
                 <CardContent className="p-6">
                   <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-cyan-500/20 flex items-center justify-center border border-cyan-500/30 group-hover:scale-110 transition-transform">
-                      <ShieldCheck className="w-6 h-6 text-cyan-400" />
+                    <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center border border-amber-500/30 group-hover:scale-110 transition-transform">
+                      <Activity className="w-6 h-6 text-amber-400" />
                     </div>
                     <div>
                       <p className="text-sm text-text-secondary font-medium uppercase tracking-wider">Workspace</p>
-                      <h3 className="text-2xl font-bold text-white mt-1 flex items-center gap-2 group-hover:text-cyan-300 transition-colors">
-                        Supervision <ArrowRight className="w-5 h-5 text-cyan-400 group-hover:translate-x-1 transition-transform" />
+                      <h3 className="text-2xl font-bold text-white mt-1 flex items-center gap-2 group-hover:text-amber-300 transition-colors">
+                        Pending Approvals <ArrowRight className="w-5 h-5 text-amber-400 group-hover:translate-x-1 transition-transform" />
                       </h3>
                     </div>
                   </div>
@@ -470,10 +475,24 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
               </Card>
             </div>
             
-            <div className="bg-[#111111] p-6 rounded-xl border border-[#222222]">
-              <h3 className="text-xl font-bold text-white mb-4">Assigned Team Lead</h3>
+            <div 
+              className="bg-[#111111] p-6 rounded-xl border border-[#222222] hover:border-cyan-500/50 cursor-pointer transition-all group"
+              onClick={() => {
+                setShowTeamLeadsModal(true);
+                setActiveTeamLeadSlide(0);
+              }}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                  <Users className="w-5 h-5 text-cyan-400" />
+                  Assigned Team Leads
+                </h3>
+                <div className="flex items-center gap-2 text-xs font-bold text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                  View Details <ArrowRight className="w-4 h-4" />
+                </div>
+              </div>
               <div className="flex flex-wrap gap-2 items-center">
-                <span className="px-3 py-1 bg-cyan-500/10 rounded-md text-sm text-cyan-300 border border-cyan-500/20 font-bold">{metrics.teamLeadName}</span>
+                <span className="px-3 py-1 bg-cyan-500/10 rounded-md text-sm text-cyan-300 border border-cyan-500/20 font-bold">{metrics.teamLeadNames}</span>
                 <span className="text-text-secondary text-sm">Managing {assignedCounterIds.length} Counters</span>
               </div>
             </div>
@@ -493,8 +512,17 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
             <AdminReportsTab
               currentSlide={currentSlide}
               slides={slides}
-              nextSlide={() => setCurrentSlide(c => (c + 1) % slides.length)}
-              prevSlide={() => setCurrentSlide(c => (c - 1 + slides.length) % slides.length)}
+              hiddenSlides={[0, 1, 2, 3]}
+              nextSlide={() => setCurrentSlide(c => {
+                let next = (c + 1) % slides.length;
+                if (next < 4) next = 4;
+                return next;
+              })}
+              prevSlide={() => setCurrentSlide(c => {
+                let prev = (c - 1 + slides.length) % slides.length;
+                if (prev < 4) prev = 5;
+                return prev;
+              })}
               reportsData={reportsData}
               reportsLoading={reportsLoading}
               reportsFilterDate={reportsFilterDate}
@@ -507,6 +535,7 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
               onOpenDuplicateDetails={(report) => setSelectedDuplicateReport(report)}
               role="auditor"
               renderCustomSlide={(idx) => idx === 5 ? renderPerformanceSlide() : null}
+              teamLeadsData={teamLeadsData}
             />
           </div>
         )}
@@ -569,6 +598,89 @@ export default function AuditorDashboard({ username, onLogout }: AuditorDashboar
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Team Leads Slider Modal */}
+      {showTeamLeadsModal && teamLeadsData.length > 0 && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowTeamLeadsModal(false)} />
+          <div className="relative bg-[#111111] border border-[#222222] rounded-2xl w-full max-w-lg shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b border-[#222222]">
+              <h3 className="text-xl font-bold text-white">Assigned Team Leads</h3>
+              <button onClick={() => setShowTeamLeadsModal(false)} className="text-text-secondary hover:text-white transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            {/* Carousel Content */}
+            <div className="p-6 relative">
+              <div className="text-center mb-6">
+                <h4 className="text-2xl font-black text-cyan-400 mb-1">{teamLeadsData[activeTeamLeadSlide].username}</h4>
+                <p className="text-sm text-text-secondary">Team Lead</p>
+              </div>
+
+              <div className="bg-[#161616] border border-[#222222] rounded-xl overflow-hidden max-h-64 overflow-y-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-[#111111] sticky top-0">
+                    <tr className="border-b border-[#333333]">
+                      <th className="py-2 px-4 text-text-secondary font-medium text-xs">#</th>
+                      <th className="py-2 px-4 text-text-secondary font-medium text-xs">Assigned Counters</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teamLeadsData[activeTeamLeadSlide].assigned_counters?.map((c: string, idx: number) => (
+                      <tr key={c} className="border-b border-[#222222] hover:bg-[#1a1a1a] transition-colors">
+                        <td className="py-2.5 px-4 text-xs font-mono text-text-secondary w-12">{idx + 1}</td>
+                        <td className="py-2.5 px-4 text-sm font-bold text-white">{c}</td>
+                      </tr>
+                    ))}
+                    {(!teamLeadsData[activeTeamLeadSlide].assigned_counters || teamLeadsData[activeTeamLeadSlide].assigned_counters.length === 0) && (
+                      <tr>
+                        <td colSpan={2} className="py-6 text-center text-sm text-text-secondary">No counters assigned.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Slider Controls */}
+              {teamLeadsData.length > 1 && (
+                <div className="flex items-center justify-between mt-6">
+                  <Button 
+                    variant="secondary" 
+                    size="sm" 
+                    onClick={() => setActiveTeamLeadSlide(prev => (prev - 1 + teamLeadsData.length) % teamLeadsData.length)}
+                    className="w-10 h-10 p-0 rounded-xl bg-[#222222] hover:bg-[#333333]"
+                  >
+                    <ArrowLeft className="w-4 h-4 text-cyan-400" />
+                  </Button>
+                  <div className="flex gap-1.5">
+                    {teamLeadsData.map((_, idx) => (
+                      <div 
+                        key={idx} 
+                        className={`h-1.5 rounded-full transition-all duration-300 ${activeTeamLeadSlide === idx ? 'w-6 bg-cyan-400' : 'w-1.5 bg-[#333333]'}`}
+                      />
+                    ))}
+                  </div>
+                  <Button 
+                    variant="secondary" 
+                    size="sm" 
+                    onClick={() => setActiveTeamLeadSlide(prev => (prev + 1) % teamLeadsData.length)}
+                    className="w-10 h-10 p-0 rounded-xl bg-[#222222] hover:bg-[#333333]"
+                  >
+                    <ArrowRight className="w-4 h-4 text-cyan-400" />
+                  </Button>
+                </div>
+              )}
+            </div>
+            
+            {/* Footer */}
+            <div className="p-4 border-t border-[#222222] bg-[#161616] flex justify-end">
+              <Button variant="ghost" onClick={() => setShowTeamLeadsModal(false)}>Close</Button>
             </div>
           </div>
         </div>
