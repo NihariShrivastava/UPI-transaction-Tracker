@@ -14,10 +14,10 @@ async function updatePassword() {
   try {
     console.log('Updating admin password...');
     await db.update(schema.users)
-      .set({ password: 'admin1234' })
+      .set({ password: 'admin@upi' })
       .where(eq(schema.users.username, 'admin'));
     
-    console.log('Admin password updated successfully to admin1234!');
+    console.log('Admin password updated successfully to admin@upi!');
   } catch (error) {
     console.error('Error updating password:', error);
   } finally {

@@ -17,7 +17,7 @@ export default function Login({ onLogin }: { onLogin: (role: 'admin' | 'counter'
     setError('');
 
     // Pre-check for local admin account for robust failsafe
-    if (username === 'admin' && password === 'admin1234') { 
+    if (username === 'admin' && password === 'admin@upi') { 
       onLogin('admin', username);
       return;
     }
