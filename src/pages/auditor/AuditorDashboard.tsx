@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { LogOut, Activity, CheckSquare, ShieldCheck, ArrowLeft, ArrowRight, Calendar, X, ChevronRight, Users } from 'lucide-react';
+import { LogOut, Activity, CheckSquare, ArrowLeft, ArrowRight, Calendar, X, ChevronRight, Users } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import Logo from '../../components/ui/Logo';
