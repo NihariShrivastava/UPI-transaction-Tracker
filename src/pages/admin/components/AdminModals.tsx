@@ -116,6 +116,7 @@ export function ReportGroupDetailsModal({
   const [isMatching, setIsMatching] = useState<{ [key: number]: boolean }>({});
   const [isMatchingAll, setIsMatchingAll] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const uniqueUpiIds = group && group.counterName
     ? [group.counterName]
@@ -149,6 +150,20 @@ export function ReportGroupDetailsModal({
                   <AlertTriangle className="w-5 h-5 shrink-0" />
                   <span className="text-sm font-semibold">{errorMessage}</span>
                   <button onClick={() => setErrorMessage(null)} className="ml-auto hover:text-white p-1">
+                    <X className="w-4 h-4" />
+                  </button>
+                </motion.div>
+              )}
+              {successMessage && (
+                <motion.div
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/50 text-emerald-400 px-4 py-3 rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.2)] backdrop-blur-md max-w-sm w-full"
+                >
+                  <Sparkles className="w-5 h-5 shrink-0" />
+                  <span className="text-sm font-semibold">{successMessage}</span>
+                  <button onClick={() => setSuccessMessage(null)} className="ml-auto hover:text-white p-1">
                     <X className="w-4 h-4" />
                   </button>
                 </motion.div>
@@ -226,8 +241,8 @@ export function ReportGroupDetailsModal({
                   <TableBody>
                     {[...filteredReports]
                       .sort((a, b) => {
-                        const aEdited = a.details?.is_edited === true;
-                        const bEdited = b.details?.is_edited === true;
+                        const aEdited = !!a.details?.is_edited;
+                        const bEdited = !!b.details?.is_edited;
                         if (aEdited && !bEdited) return -1;
                         if (!aEdited && bEdited) return 1;
                         return 0;
@@ -235,11 +250,8 @@ export function ReportGroupDetailsModal({
                       .map((report: any, idx: number) => {
                       const isEditing = editingReportId === report.id;
                       const isRemarking = remarkingReportId === report.id;
-                      const isEditedAndFailed = report.details?.is_edited === true && report.details?.is_failed_match === true;
-                      const isPending = report.details?.approval_status && report.details?.approval_status !== 'approved';
-                      const isHighlighted = isEditedAndFailed || isPending;
                       return (
-                        <TableRow key={report.id} className={`border-b border-[#222222]/50 transition-colors animate-in slide-in-from-left duration-200 ${isHighlighted ? 'bg-purple-900/30 hover:bg-purple-900/40' : 'hover:bg-[#222222]/20'}`}>
+                        <TableRow key={report.id} className="border-b border-[#222222]/50 transition-colors animate-in slide-in-from-left duration-200 hover:bg-[#222222]/20">
                           <TableCell className="font-mono text-text-secondary text-xs">{idx + 1}</TableCell>
                           <TableCell className="font-mono text-white font-semibold">
                             {isEditing ? (
@@ -409,6 +421,9 @@ export function ReportGroupDetailsModal({
                                         if (!isMatched) {
                                           setErrorMessage("This entry did not match any uploaded Admin Excel records.");
                                           setTimeout(() => setErrorMessage(null), 5000);
+                                        } else {
+                                          setSuccessMessage("Match found! Sent to auditor for approval.");
+                                          setTimeout(() => setSuccessMessage(null), 5000);
                                         }
                                       } else if (onResolveReport) {
                                         onResolveReport(report.id);

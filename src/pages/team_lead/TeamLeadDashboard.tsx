@@ -198,11 +198,16 @@ export default function TeamLeadDashboard({ username, onLogout }: TeamLeadDashbo
       const { data: originalReport } = await supabase.from('reports').select('*').eq('id', reportId).single();
       const updatedDetails = { 
         ...(originalReport?.details || {}), 
-        approval_status: 'pending_edit',
+        is_edited: true,
+        is_failed_match: false,
         proposed_edit: { upi_id: newUpiId, amount: newAmount },
         acted_by: teamLeadData?.id,
         acted_at: new Date().toISOString()
       };
+      // Do not set approval_status to 'pending_edit' here so it stays in the view for matching
+      if (updatedDetails.approval_status === 'pending_edit') {
+        delete updatedDetails.approval_status;
+      }
 
       const { error } = await supabase.from('reports').update({ details: updatedDetails }).eq('id', reportId);
       if (error) throw error;
@@ -240,14 +245,16 @@ export default function TeamLeadDashboard({ username, onLogout }: TeamLeadDashbo
 
       // Use proposed edit amount if it exists, otherwise original amount
       const targetAmount = originalReport.details?.proposed_edit?.amount || originalReport.amount;
+      const targetUpiId = originalReport.details?.proposed_edit?.upi_id || originalReport.upi_id;
 
-      // Verify if there's any admin transaction for this amount and date
+      // Verify if there's any admin transaction for this amount and date and upi_id
       const { data: adminMatches } = await supabase
         .from('transactions')
         .select('*')
         .eq('source', 'admin')
         .eq('date', originalReport.date)
-        .eq('amount', targetAmount);
+        .eq('amount', targetAmount)
+        .ilike('upi_id', `%${targetUpiId}%`);
 
       if (adminMatches && adminMatches.length > 0) {
         const updatedDetails = { 

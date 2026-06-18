@@ -728,7 +728,15 @@ export default function AdminReportsTab({
               
               let finalData: any[] = [];
               if (isGrouped) {
-                finalData = filteredGroupedReportsByCounter.filter(g => selectedCounterFilter.length === 0 || selectedCounterFilter.includes(g.username));
+                finalData = filteredGroupedReportsByCounter
+                  .filter(g => selectedCounterFilter.length === 0 || selectedCounterFilter.includes(g.username))
+                  .sort((a, b) => {
+                    const aHasEditedAndFailed = a.reports.some((r: any) => !!r.details?.is_edited && !!r.details?.is_failed_match);
+                    const bHasEditedAndFailed = b.reports.some((r: any) => !!r.details?.is_edited && !!r.details?.is_failed_match);
+                    if (aHasEditedAndFailed && !bHasEditedAndFailed) return -1;
+                    if (!aHasEditedAndFailed && bHasEditedAndFailed) return 1;
+                    return 0;
+                  });
               } else {
                 finalData = filteredReportsData
                   .filter((report) => {
@@ -751,8 +759,8 @@ export default function AdminReportsTab({
                     return true;
                   })
                   .sort((a, b) => {
-                    const aEdited = a.details?.is_edited === true;
-                    const bEdited = b.details?.is_edited === true;
+                    const aEdited = !!a.details?.is_edited && !!a.details?.is_failed_match;
+                    const bEdited = !!b.details?.is_edited && !!b.details?.is_failed_match;
                     if (aEdited && !bEdited) return -1;
                     if (!aEdited && bEdited) return 1;
                     return 0;
@@ -767,19 +775,19 @@ export default function AdminReportsTab({
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
                     {isGrouped ? (
                       paginatedData.map((group, idx) => (
-                <motion.div
-                  key={`${group.counterId || 'unknown'}_${idx}`}
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  whileHover={{ y: -6, scale: 1.02 }}
-                  onClick={() => onOpenGroupDetails({
-                    counterId: group.counterId,
-                    counterName: group.username,
-                    reports: group.reports,
-                    totalAmount: group.totalAmount
-                  })}
-                  className="group relative bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] hover:border-purple-500/40 p-6 rounded-2xl transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between"
-                >
+                        <motion.div
+                          key={`${group.counterId || 'unknown'}_${idx}`}
+                          initial={{ opacity: 0, y: 15 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          whileHover={{ y: -6, scale: 1.02 }}
+                          onClick={() => onOpenGroupDetails({
+                            counterId: group.counterId,
+                            counterName: group.username,
+                            reports: group.reports,
+                            totalAmount: group.totalAmount
+                          })}
+                          className="group relative bg-gradient-to-br from-[#161616] to-[#0d0d0d] border border-[#222222] hover:border-purple-500/40 p-6 rounded-2xl transition-all duration-300 shadow-xl cursor-pointer overflow-hidden flex flex-col justify-between"
+                        >
                   <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
                   <div>
                     <div className="flex items-center justify-between mb-4">
@@ -811,7 +819,6 @@ export default function AdminReportsTab({
                       paginatedData.map((report) => {
                   const isEditing = editingReportId === report.id;
                   const isRemarking = remarkingReportId === report.id;
-                  const isEditedAndFailed = report.details?.is_edited === true && report.details?.is_failed_match === true;
                   return (
                   <motion.div
                     key={report.id}
@@ -823,11 +830,7 @@ export default function AdminReportsTab({
                         onOpenDuplicateDetails(report);
                       }
                     }}
-                    className={`group relative border ${
-                      isEditedAndFailed 
-                        ? 'bg-purple-900/30 border-purple-500/50 hover:bg-purple-900/40' 
-                        : 'bg-gradient-to-br from-[#161616] to-[#0d0d0d] border-[#222222] hover:border-purple-500/30'
-                    } p-6 rounded-2xl transition-all duration-300 shadow-xl overflow-hidden flex flex-col justify-between ${
+                    className={`group relative border bg-gradient-to-br from-[#161616] to-[#0d0d0d] border-[#222222] hover:border-purple-500/30 p-6 rounded-2xl transition-all duration-300 shadow-xl overflow-hidden flex flex-col justify-between ${
                       !isEditing && report.type === 'duplicate_upi' ? 'cursor-pointer' : ''
                     }`}
                   >
