@@ -289,7 +289,7 @@ export default function AdminReportsTab({
     if (currentSlide !== 3) return [];
     return groupedReportsByCounter.map(g => ({
       name: g.username,
-      uploaded: uploadMetrics?.byCounter[g.username] || 0,
+      uploaded: uploadMetrics?.byCounter?.[g.username] || 0,
       discrepancies: g.reports.length,
       matched: g.reports.filter((r: any) => r.details?.is_edited && !r.details?.is_failed_match).length
     }));
@@ -299,7 +299,7 @@ export default function AdminReportsTab({
     if (currentSlide !== 0) return [];
     return groupedReportsByCounter.map(g => ({
       name: g.username,
-      uploaded: uploadMetrics?.byCounter[g.username] || 0,
+      uploaded: uploadMetrics?.byCounter?.[g.username] || 0,
       discrepancies: g.reports.length,
       matched: g.reports.filter((r: any) => r.details?.is_edited && !r.details?.is_failed_match).length
     }));
@@ -309,7 +309,7 @@ export default function AdminReportsTab({
     if (currentSlide !== 1) return [];
     return groupedMissingInCounter.map((g: any) => ({
       name: g.storeName === 'Unassigned Mismatches' ? 'Unassigned Mismatches' : `${g.storeName} - ${g.storeId}`,
-      uploaded: uploadMetrics?.byStore[g.storeName === 'Unassigned Mismatches' ? 'Unassigned Mismatches' : `${g.storeName} - ${g.storeId}`] || 0,
+      uploaded: uploadMetrics?.byStore?.[g.storeName === 'Unassigned Mismatches' ? 'Unassigned Mismatches' : `${g.storeName} - ${g.storeId}`] || 0,
       discrepancies: g.reports.length,
       matched: g.reports.filter((r: any) => r.details?.is_edited && !r.details?.is_failed_match).length
     }));
@@ -327,7 +327,7 @@ export default function AdminReportsTab({
         uploaded = uploadMetrics?.byAdmin || 0;
       } else if (r.details?.source === 'counter') {
          name = r.users?.counter_name || `Counter ${r.counter_id}`;
-         uploaded = uploadMetrics?.byCounter[r.users?.username] || 0; // fallback logic
+         uploaded = uploadMetrics?.byCounter?.[r.users?.username || ''] || 0; // fallback logic
       }
       
       if (!groups[name]) groups[name] = { name, uploaded, discrepancies: 0, matched: 0 };

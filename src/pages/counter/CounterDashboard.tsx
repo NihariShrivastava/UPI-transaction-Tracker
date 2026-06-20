@@ -22,8 +22,8 @@ const findHeaderKey = (row: any, synonyms: string[]): string | null => {
 };
 
 // Robust Excel date parsing (handles JS Date objects, Excel numeric serials, and string formats)
-const parseExcelDate = (val: any): string => {
-  if (!val) return '';
+const parseExcelDate = (val: any): string | null => {
+  if (!val) return null;
   if (val instanceof Date) {
     const y = val.getFullYear();
     const m = String(val.getMonth() + 1).padStart(2, '0');
@@ -61,7 +61,7 @@ const parseExcelDate = (val: any): string => {
     }
   } catch (e) {}
 
-  return str;
+  return null;
 };
 
 // Robust Excel amount parsing (cleans currency symbols, commas, and formatting)
@@ -300,10 +300,22 @@ export default function CounterDashboard({ username, onLogout }: { username: str
 
         // Helper to find a match where cheque is searched inside UTR
         const findMatch = (cKey: string) => {
+          const cleanCounter = cKey.replace(/[^a-z0-9]/g, '').replace(/^0+/, '');
+          if (!cleanCounter) return undefined;
+
           // Iterate over all admin UTRs and see if the admin UTR includes the cheque number
           for (const [adminUtr, list] of adminUtrMap.entries()) {
-            if (adminUtr.includes(cKey)) {
+            const cleanAdmin = adminUtr.replace(/[^a-z0-9]/g, '').replace(/^0+/, '');
+            if (!cleanAdmin) continue;
+
+            if (cleanAdmin === cleanCounter) {
               return list;
+            }
+
+            if (cleanAdmin.length >= 5 && cleanCounter.length >= 5) {
+              if (cleanAdmin.includes(cleanCounter) || cleanCounter.includes(cleanAdmin)) {
+                return list;
+              }
             }
           }
           return undefined;
@@ -359,14 +371,25 @@ export default function CounterDashboard({ username, onLogout }: { username: str
           const parts = rawUpiId.split(',');
           
           let utr = parts[0]?.trim().toLowerCase() || '';
+          const cleanAdmin = utr.replace(/[^a-z0-9]/g, '').replace(/^0+/, '');
 
           let matchedCounterList = undefined;
 
           // Search if any counter cheque number is included in this admin UTR
           for (const [cKey, list] of counterMap.entries()) {
-            if (utr && utr.includes(cKey)) {
+            const cleanCounter = cKey.replace(/[^a-z0-9]/g, '').replace(/^0+/, '');
+            if (!cleanAdmin || !cleanCounter) continue;
+
+            if (cleanAdmin === cleanCounter) {
               matchedCounterList = list;
               break;
+            }
+
+            if (cleanAdmin.length >= 5 && cleanCounter.length >= 5) {
+              if (cleanAdmin.includes(cleanCounter) || cleanCounter.includes(cleanAdmin)) {
+                matchedCounterList = list;
+                break;
+              }
             }
           }
 

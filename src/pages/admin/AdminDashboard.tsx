@@ -28,9 +28,9 @@ const findHeaderKey = (row: any, synonyms: string[]): string | null => {
   return null;
 };
 
-// Robust date parser (handles JS Date objects, Excel date serials, and string formats)
-const parseExcelDate = (val: any): string => {
-  if (!val) return '';
+// Robust Excel date parsing (handles JS Date objects, Excel numeric serials, and string formats)
+const parseExcelDate = (val: any): string | null => {
+  if (!val) return null;
   if (val instanceof Date) {
     const y = val.getFullYear();
     const m = String(val.getMonth() + 1).padStart(2, '0');
@@ -45,14 +45,19 @@ const parseExcelDate = (val: any): string => {
     return `${y}-${m}-${d}`;
   }
   const str = String(val).trim();
+  
+  // Try DD-MM-YYYY or DD/MM/YYYY
   const dmyMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (dmyMatch) {
     return `${dmyMatch[3]}-${dmyMatch[2].padStart(2, '0')}-${dmyMatch[1].padStart(2, '0')}`;
   }
+
+  // Try YYYY-MM-DD or YYYY/MM/DD
   const ymdMatch = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
   if (ymdMatch) {
     return `${ymdMatch[1]}-${ymdMatch[2].padStart(2, '0')}-${ymdMatch[3].padStart(2, '0')}`;
   }
+
   try {
     const parsed = new Date(str);
     if (!isNaN(parsed.getTime())) {
@@ -62,7 +67,8 @@ const parseExcelDate = (val: any): string => {
       return `${y}-${m}-${d}`;
     }
   } catch (e) {}
-  return str;
+
+  return null;
 };
 
 // Robust currency/amount cleaner
@@ -669,10 +675,22 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
         // Helper to find a match where cheque is searched inside UTR
         const findMatch = (cKey: string) => {
+          const cleanCounter = cKey.replace(/[^a-z0-9]/g, '').replace(/^0+/, '');
+          if (!cleanCounter) return undefined;
+
           // Iterate over all admin UTRs and see if the admin UTR includes the cheque number
           for (const [adminUtr, list] of adminUtrMap.entries()) {
-            if (adminUtr.includes(cKey)) {
+            const cleanAdmin = adminUtr.replace(/[^a-z0-9]/g, '').replace(/^0+/, '');
+            if (!cleanAdmin) continue;
+
+            if (cleanAdmin === cleanCounter) {
               return list;
+            }
+
+            if (cleanAdmin.length >= 5 && cleanCounter.length >= 5) {
+              if (cleanAdmin.includes(cleanCounter) || cleanCounter.includes(cleanAdmin)) {
+                return list;
+              }
             }
           }
           return undefined;
@@ -728,14 +746,25 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           const parts = rawUpiId.split(',');
           
           let utr = parts[0]?.trim().toLowerCase() || '';
+          const cleanAdmin = utr.replace(/[^a-z0-9]/g, '').replace(/^0+/, '');
 
           let matchedCounterList = undefined;
 
           // Search if any counter cheque number is included in this admin UTR
           for (const [cKey, list] of counterMap.entries()) {
-            if (utr && utr.includes(cKey)) {
+            const cleanCounter = cKey.replace(/[^a-z0-9]/g, '').replace(/^0+/, '');
+            if (!cleanAdmin || !cleanCounter) continue;
+
+            if (cleanAdmin === cleanCounter) {
               matchedCounterList = list;
               break;
+            }
+
+            if (cleanAdmin.length >= 5 && cleanCounter.length >= 5) {
+              if (cleanAdmin.includes(cleanCounter) || cleanCounter.includes(cleanAdmin)) {
+                matchedCounterList = list;
+                break;
+              }
             }
           }
 
@@ -829,6 +858,10 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
   const handleDelete = async (id: number) => {
     if (window.confirm('Are you sure you want to delete this counter? All associated transactions and reports will also be deleted.')) {
       try {
+        // Cascade delete explicitly since Supabase/Drizzle config may not enforce it automatically
+        await supabase.from('transactions').delete().eq('counter_id', id);
+        await supabase.from('reports').delete().eq('counter_id', id);
+
         const { error } = await supabase
           .from('users')
           .delete()
